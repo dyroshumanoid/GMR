@@ -22,6 +22,7 @@ ROBOT_XML_DICT = {
     "pnd_adam_lite": ASSET_ROOT / "pnd_adam_lite" / "scene.xml",
     "tienkung": ASSET_ROOT / "tienkung" / "mjcf" / "tienkung.xml",
     "pal_talos": ASSET_ROOT / "pal_talos" / "talos.xml",
+    "tocabi": ASSET_ROOT / "tocabi" / "dyros_tocabi.xml",
 }
 
 IK_CONFIG_DICT = {
@@ -52,6 +53,7 @@ IK_CONFIG_DICT = {
         "stanford_toddy": IK_CONFIG_ROOT / "bvh_lafan1_to_toddy.json",
         "engineai_pm01": IK_CONFIG_ROOT / "bvh_lafan1_to_pm01.json",
         "pal_talos": IK_CONFIG_ROOT / "bvh_to_talos.json",
+        "tocabi": IK_CONFIG_ROOT / "bvh_lafan1_to_tocabi.json",
     },
     "bvh_nokov":{
         "unitree_g1": IK_CONFIG_ROOT / "bvh_nokov_to_g1.json",
@@ -88,6 +90,7 @@ ROBOT_BASE_DICT = {
     "pnd_adam_lite": "pelvis",
     "tienkung": "Base_link",
     "pal_talos": "base_link",
+    "tocabi": "base_link",
 }
 
 VIEWER_CAM_DISTANCE_DICT = {
@@ -108,4 +111,5 @@ VIEWER_CAM_DISTANCE_DICT = {
     "pnd_adam_lite": 3.0,
     "tienkung": 3.0,
     "pal_talos": 3.0,
+    "tocabi": 3.0,
 }

@@ -1,0 +1,3 @@
+[submodule "ubisoft-laforge-animation-dataset"]
+	path = ubisoft-laforge-animation-dataset
+	url = https://github.com/ubisoft/ubisoft-laforge-animation-dataset.git
