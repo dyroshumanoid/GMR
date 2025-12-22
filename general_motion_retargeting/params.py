@@ -22,7 +22,7 @@ ROBOT_XML_DICT = {
     "pnd_adam_lite": ASSET_ROOT / "pnd_adam_lite" / "scene.xml",
     "tienkung": ASSET_ROOT / "tienkung" / "mjcf" / "tienkung.xml",
     "pal_talos": ASSET_ROOT / "pal_talos" / "talos.xml",
-    "tocabi": ASSET_ROOT / "tocabi" / "mjcf" / "dyros_tocabi_simplified.xml",
+    "tocabi": ASSET_ROOT / "tocabi" / "mjcf" / "dyros_tocabi_gmr.xml",
 }
 
 IK_CONFIG_DICT = {
