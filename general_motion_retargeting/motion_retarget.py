@@ -3,10 +3,10 @@ import mink
 import mujoco as mj
 import numpy as np
 import json
+import yaml
 from scipy.spatial.transform import Rotation as R
 from .params import ROBOT_XML_DICT, IK_CONFIG_DICT
 from rich import print
-# motion_retarget.py 상단 import 근처에 추가
 from mink.exceptions import TargetNotSet
 
 
@@ -19,7 +19,7 @@ class GeneralMotionRetargeting:
         tgt_robot: str,
         actual_human_height: float = None,
         solver: str="daqp", # change from "quadprog" to "daqp".
-        damping: float=5e-1, # change from 1e-1 to 1e-2.
+        damping: float=0.05, # Default value; will be overwritten by collision_cfg.yaml if provided.
         verbose: bool=True,
         use_velocity_limit: bool=False,
     ) -> None:
@@ -29,7 +29,7 @@ class GeneralMotionRetargeting:
         if verbose:
             print("Use robot model: ", self.xml_file)
         self.model = mj.MjModel.from_xml_path(self.xml_file)
-        
+
         # Print DoF names in order
         print("[GMR] Robot Degrees of Freedom (DoF) names and their order:")
         self.robot_dof_names = {}
@@ -83,7 +83,7 @@ class GeneralMotionRetargeting:
         self.human_scale_table = ik_config["human_scale_table"]
         self.ground = ik_config["ground_height"] * np.array([0, 0, 1])
 
-        self.max_iter = 10
+        self.max_iter = 10 # Default value; will be overwritten by collision_cfg.yaml if provided.
 
         self.solver = solver
         self.damping = damping
@@ -97,24 +97,67 @@ class GeneralMotionRetargeting:
 
         self.task_errors1 = {}
         self.task_errors2 = {}
-        # task -> human body mapping (중복 body_name 대응용)
+        
+        # task -> human body mapping for handling duplicate body_name assignments
         self.task_to_human_body1 = {}
         self.task_to_human_body2 = {}
+
+        # Initialize IK constraints starting with joint configuration limits
         self.ik_limits = [mink.ConfigurationLimit(self.model)]
+
+        #add velocity limits
         if use_velocity_limit:
             VELOCITY_LIMITS = {k: 3*np.pi for k in self.robot_motor_names.keys()}
             self.ik_limits.append(mink.VelocityLimit(self.model, VELOCITY_LIMITS)) 
-            
-        self.setup_retarget_configuration()
+
+        # --- Collision Avoidance Configuration ---
+        # Load robot-specific collision parameters from an external YAML file
+        collision_cfg_path = f"assets/{tgt_robot}/collision_cfg.yaml"
+        with open(collision_cfg_path, 'r') as f:
+            cfg = yaml.safe_load(f)
+
+        # Override IK solver parameters with values from the configuration
+        params = cfg.get('parameters', {})
+        self.damping = params.get('damping', damping)
+        self.max_iter = params.get('max_iter', 10)
         
+        if verbose:
+            print(f"[GMR] Final Parameters ->  Damping: {self.damping}, Max Iterations: {self.max_iter}")
+        
+        # Resolve collision groups and individual geometries
+        self.groups = cfg['groups']
+        self.all_collision_limits = []
+
+        # Iterate through defined collision pairs and register them as IK limits
+        for limit_cfg in cfg['collision_limits']:
+            geom_pairs = []
+            
+            for p_a, p_b in limit_cfg['pairs']:
+                # Support both pre-defined groups and individual geometry names
+                list_a = self.groups.get(p_a, [p_a] if isinstance(p_a, str) else p_a)
+                list_b = self.groups.get(p_b, [p_b] if isinstance(p_b, str) else p_b)
+                geom_pairs.append((list_a, list_b))
+
+            # Define the collision avoidance limit with safety margins and gains
+            limit_obj = mink.CollisionAvoidanceLimit(
+                model=self.model,
+                geom_pairs=geom_pairs,
+                minimum_distance_from_collisions=limit_cfg['margin'],
+                collision_detection_distance=limit_cfg['detect_dist'],
+                gain=limit_cfg.get('gain', 500.0),
+            )
+            
+            self.ik_limits.append(limit_obj)
+            self.all_collision_limits.append(limit_obj)
+        
+        self.setup_retarget_configuration()
         self.ground_offset = 0.0
 
     def setup_retarget_configuration(self):
         self.configuration = mink.Configuration(self.model)
-
         self.tasks1 = []
         self.tasks2 = []
-
+        
         # reset mappings
         self.human_body_to_task1 = {}
         self.human_body_to_task2 = {}
@@ -142,8 +185,9 @@ class GeneralMotionRetargeting:
                 orientation_cost=rot_weight,
                 lm_damping=1,
             )
-
-            # NOTE: body_name 중복 가능 → dict에 덮어써져도 상관없게, task->body 매핑을 별도로 유지
+            
+            # NOTE: Multiple robot tasks may track the same human body part. 
+            # Using the Task object as a key prevents data loss from duplicate body names.
             self.human_body_to_task1[body_name] = task
             self.task_to_human_body1[task] = body_name
 
@@ -177,12 +221,14 @@ class GeneralMotionRetargeting:
             self.task_errors2[task] = []
 
 
+
+
     def update_targets(self, human_data, offset_to_ground=False):
         # scale/offset human data
         human_data = self.to_numpy(human_data)
         human_data = self.scale_human_data(human_data, self.human_root_name, self.human_scale_table)
 
-        # table1 offset 적용 (pos_offsets1/rot_offsets1에 있는 body만)
+        # Apply Table 1 spatial offsets (only for bodies with defined offset entries)
         human_data = self.offset_human_data(human_data, self.pos_offsets1, self.rot_offsets1)
         human_data = self.apply_ground_offset(human_data)
 
@@ -191,12 +237,12 @@ class GeneralMotionRetargeting:
 
         self.scaled_human_data = human_data
 
-        # ✅ 핵심: tasks1 전체를 돌면서 task->body_name으로 target을 set
+        # CORE: Iterate through all tasks in Table 1 and set IK targets using the mapping
         if self.use_ik_match_table1:
             for task in self.tasks1:
                 body_name = self.task_to_human_body1[task]
                 if body_name not in human_data:
-                    # 데이터에 없으면 target 못 세팅 → 경고만
+                    # Skip target update and log a warning if the required body data is missing.
                     print(f"[WARN] human_data missing key for tasks1: {body_name}")
                     continue
                 pos, rot = human_data[body_name]
@@ -211,6 +257,35 @@ class GeneralMotionRetargeting:
                 pos, rot = human_data[body_name]
                 task.set_target(mink.SE3.from_rotation_and_translation(mink.SO3(rot), pos))
 
+    # Utility function to monitor and log active collisions during the IK process
+    def log_collision_warning(self, stage_name, num_iter):
+        mj.mj_fwdPosition(self.model, self.configuration.data)
+        
+        fromto = np.zeros(6, dtype=np.float64)
+
+        for limit_obj in self.all_collision_limits:
+            current_limit = limit_obj.minimum_distance_from_collisions
+            
+            for id_a, id_b in limit_obj.geom_id_pairs:
+                if id_a == -1 or id_b == -1:
+                    continue
+
+                # Compute the shortest distance between two geometries
+                dist = mj.mj_geomDistance(self.model, self.configuration.data, id_a, id_b, 8.0, fromto)
+
+                # Log a detailed warning if a penetration (collision) is detected
+                if dist <= 0:
+                    name_a = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_GEOM, id_a)
+                    name_b = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_GEOM, id_b)
+                    
+                    p1 = self.configuration.data.geom_xpos[id_a]
+                    p2 = self.configuration.data.geom_xpos[id_b]
+                    c_dist = np.linalg.norm(p1 - p2)
+                    
+                    msg = (f"[bold red][COLLISION][/bold red] {stage_name} | Iter:{num_iter} | "
+                           f"{name_a} <-> {name_b} | "
+                           f"Dist:{dist:.4f} (Limit:{current_limit:.3f}) | CenterDist:{c_dist:.4f}")
+                    print(msg)
 
     def retarget(self, human_data, offset_to_ground=False):
         self.update_targets(human_data, offset_to_ground)
@@ -226,13 +301,13 @@ class GeneralMotionRetargeting:
                 dt,
                 self.solver,
                 self.damping,
-                self.ik_limits,
+                limits=self.ik_limits,
             )
             self.configuration.integrate_inplace(vel1, dt)
-
             next_error = self.error1()
             num_iter = 0
-            while (curr_error - next_error) > 0.001 and num_iter < self.max_iter:
+
+            while abs(curr_error - next_error) > 1e-8 and num_iter < self.max_iter:
                 curr_error = next_error
                 dt = self.configuration.model.opt.timestep
                 vel1 = mink.solve_ik(
@@ -241,11 +316,14 @@ class GeneralMotionRetargeting:
                     dt,
                     self.solver,
                     self.damping,
-                    self.ik_limits,
+                    limits=self.ik_limits,
                 )
                 self.configuration.integrate_inplace(vel1, dt)
-                next_error = self.error1()
+                next_error = self.error1()          
                 num_iter += 1
+            # Log collision warnings for the final solution of Stage 1
+            self.log_collision_warning("Table1", num_iter)
+
 
         if self.use_ik_match_table2 and len(self.tasks2) > 0:
             curr_error = self.error2()
@@ -256,13 +334,12 @@ class GeneralMotionRetargeting:
                 dt,
                 self.solver,
                 self.damping,
-                self.ik_limits,
+                limits=self.ik_limits,
             )
             self.configuration.integrate_inplace(vel2, dt)
-
             next_error = self.error2()
             num_iter = 0
-            while (curr_error - next_error) > 0.001 and num_iter < self.max_iter:
+            while abs(curr_error - next_error) > 1e-8 and num_iter < self.max_iter:
                 curr_error = next_error
                 dt = self.configuration.model.opt.timestep
                 vel2 = mink.solve_ik(
@@ -271,11 +348,13 @@ class GeneralMotionRetargeting:
                     dt,
                     self.solver,
                     self.damping,
-                    self.ik_limits,
+                    limits=self.ik_limits,
                 )
                 self.configuration.integrate_inplace(vel2, dt)
                 next_error = self.error2()
                 num_iter += 1
+            # Log collision warnings for the final solution of Stage 2 (Final Pose)
+            self.log_collision_warning("Table2", num_iter)
 
         return self.configuration.data.qpos.copy()
 

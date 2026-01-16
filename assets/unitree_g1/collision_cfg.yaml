@@ -1,0 +1,60 @@
+# Robot body group definitions and self-collision limit parameters
+parameters:
+  damping: 0.15
+  max_iter: 10
+
+
+groups:
+  head: ["Head"]
+  torso: ["Left_Pelvis", "Right_Pelvis", "Waist", "Upper_Left_Chest", "Upper_Right_Chest"]
+  
+  l_foot: ["Left_Foot"]
+  r_foot: ["Right_Foot"]
+
+  l_hand_arm: ["Left_Elbow", "Left_Forearm", "Left_Hand1", "Left_Hand2", "Left_Hand3"]
+  r_hand_arm: ["Right_Elbow", "Right_Forearm", "Right_Hand1", "Right_Hand2", "Right_Hand3"]
+  l_lower_leg_foot: ["Left_Lower_Leg", "Left_Lower_Leg2", "Left_Foot"]
+  r_lower_leg_foot: ["Right_Lower_Leg", "Right_Lower_Leg2", "Right_Foot"]
+
+  l_arm: ["Left_Upper_Arm", "Left_Forearm", "Left_Elbow", "Left_Hand1", "Left_Hand2", "Left_Hand3"]
+  r_arm: ["Right_Upper_Arm", "Right_Forearm", "Right_Elbow", "Right_Hand1", "Right_Hand2", "Right_Hand3"]
+  l_leg: ["Left_Upper_Leg1", "Left_Upper_Leg2", "Left_Lower_Leg", "Left_Lower_Leg2", "Left_Foot"]
+  r_leg: ["Right_Upper_Leg1", "Right_Upper_Leg2", "Right_Lower_Leg", "Right_Lower_Leg2", "Right_Foot"]
+
+
+collision_limits:
+  - name: "feet"
+    pairs: [["l_foot", "r_foot"]]
+    margin: 0.01
+    detect_dist: 0.1
+    gain: 1.0
+
+  - name: "shin"
+    pairs: [["Left_Lower_Leg", "Right_Lower_Leg"]]
+    margin: 0.01
+    detect_dist: 0.1
+    gain: 1.0
+
+  - name: "hands"
+    pairs:
+      - ["l_hand_arm", "l_leg"]
+      - ["l_hand_arm", "r_leg"]
+      - ["r_hand_arm", "l_leg"]
+      - ["r_hand_arm", "r_leg"]
+    margin: 0.01
+    detect_dist: 0.07
+    gain: 0.001
+
+  - name: "body_general"
+    pairs: 
+      - ["l_leg", "r_leg"]
+      - ["l_hand_arm", "torso"]
+      - ["r_hand_arm", "torso"]
+      - ["head", "l_arm"]
+      - ["head", "r_arm"]
+      - ["l_lower_leg_foot", "torso"]
+      - ["r_lower_leg_foot", "torso"]
+    margin: 0.03
+    detect_dist: 0.1
+    gain: 1.0
+  
