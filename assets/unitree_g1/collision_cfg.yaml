@@ -1,6 +1,6 @@
 # Robot body group definitions and self-collision limit parameters
 parameters:
-  damping: 0.15
+  damping: 0.9
   max_iter: 10
 
 

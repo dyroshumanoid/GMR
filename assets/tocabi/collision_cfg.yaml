@@ -30,7 +30,7 @@ collision_limits:
 
   - name: "feet"
     pairs: [["l_foot", "r_foot"]]
-    margin: 0.09
+    margin: 0.02
     detect_dist: 0.1
     gain: 0.001
 
