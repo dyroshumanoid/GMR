@@ -1,4 +1,3 @@
-
 import mink
 import mujoco as mj
 import numpy as np
@@ -8,7 +7,243 @@ from scipy.spatial.transform import Rotation as R
 from .params import ROBOT_XML_DICT, IK_CONFIG_DICT
 from rich import print
 from mink.exceptions import TargetNotSet
+from mink.tasks.damping_task import DampingTask
+def cubic_hermite(time, time_0, time_f, x_0, x_f, x_dot_0=0.0, x_dot_f=0.0):
 
+    if time < time_0:
+        return float(x_0)
+    if time > time_f:
+        return float(x_f)
+
+    elapsed = time - time_0
+    T = time_f - time_0
+    T2 = T * T
+    T3 = T2 * T
+    dx = x_f - x_0
+
+    return float(
+        x_0
+        + x_dot_0 * elapsed
+        + (3 * dx / T2 - 2 * x_dot_0 / T - x_dot_f / T) * elapsed * elapsed
+        + (-2 * dx / T3 + (x_dot_0 + x_dot_f) / T2) * elapsed * elapsed * elapsed
+    )
+
+def damping_from_distance(dist, eps, detect_dist, d_min, d_max, slope_eps=0.0, slope_detect=0.0):
+
+    if detect_dist <= eps:
+        return float(d_max if dist <= eps else d_min)
+
+    return cubic_hermite(
+        time=dist,
+        time_0=eps,
+        time_f=detect_dist,
+        x_0=d_max,
+        x_f=d_min,
+        x_dot_0=slope_eps,
+        x_dot_f=slope_detect,
+    )
+
+
+class AdaptiveJointDamping:
+    def __init__(
+        self,
+        model,
+        all_collision_limits,
+        d_min,
+        d_max,
+        *,
+        log_every=200,
+        log_topk=12,
+        verbose_pairs=False,
+        concise_log=True,
+        round_digits=3,
+        name_by_limit=None,
+    ):
+        self.model = model
+        self.limits = all_collision_limits
+        self.d_min = float(d_min)
+        self.d_max = float(d_max)
+
+        self.lambda_vec = np.full(model.nv, self.d_min, dtype=float)
+        self.task = DampingTask(model, cost=self.lambda_vec.copy())
+        self._fromto = np.zeros(6, dtype=np.float64)
+
+        self._step = 0
+        self.log_every = int(log_every)
+        self.log_topk = int(log_topk)
+        self.verbose_pairs = bool(verbose_pairs)
+        self.name_by_limit = name_by_limit or {}
+        
+        self._prev_lam = self.lambda_vec.copy()
+        self.concise_log = bool(concise_log)
+        self.round_digits = int(round_digits)
+
+        self._left_arm_joint_prefixes = (
+            "left_shoulder_", "left_elbow_", "left_wrist_"
+        )
+
+    def _dof_to_joint_name(self, dof_i: int) -> str:
+        j_id = int(self.model.dof_jntid[dof_i])
+        name = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_JOINT, j_id)
+        return name if name is not None else f"joint#{j_id}"
+    
+    def _joint_and_dof_label(self, dof_i: int) -> str:
+        j_id = int(self.model.dof_jntid[dof_i])
+        j_name = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_JOINT, j_id)
+        if j_name is None:
+            j_name = f"joint#{j_id}"
+        return j_name
+
+
+    def update(self, data):
+        self._step += 1
+        mj.mj_fwdPosition(self.model, data)
+
+        lam = np.full(self.model.nv, self.d_min, dtype=float)
+
+
+        left_arm_cause_by_dof = {}
+
+        for li, limit_obj in enumerate(self.limits):
+            detect_dist = float(getattr(limit_obj, "collision_detection_distance"))
+            eps = float(getattr(limit_obj, "minimum_distance_from_collisions"))
+
+            for id_a, id_b in limit_obj.geom_id_pairs:
+                if id_a == -1 or id_b == -1:
+                    continue
+
+                dist = mj.mj_geomDistance(self.model, data, id_a, id_b, 8.0, self._fromto)
+                if dist >= detect_dist:
+                    continue
+
+                d_val = damping_from_distance(
+                    dist=dist, eps=eps, detect_dist=detect_dist,
+                    d_min=self.d_min, d_max=self.d_max
+                )
+
+                dof_subset = self._get_affected_dofs(id_a, id_b)
+                
+
+
+                lam[dof_subset] = np.maximum(lam[dof_subset], d_val)
+
+                name_a = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_GEOM, id_a) or f"geom#{id_a}"
+                name_b = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_GEOM, id_b) or f"geom#{id_b}"
+                # if "hand" in name_a.lower() or "hand" in name_b.lower():
+                #     print(f"\n[DEBUG_FOOT] Triggered by: {name_a} <-> {name_b}")
+                #     print(f"[DEBUG_FOOT] Affected Joint Names (Chain to Root):")
+                #     # DoF 인덱스를 Joint 이름으로 변환해서 출력
+                #     joint_names = sorted(list(set([self._dof_to_joint_name(d) for d in dof_subset])))
+                #     for j_name in joint_names:
+                #         print(f"  - {j_name}")
+                #     print("-" * 30)
+
+                for dof_i in dof_subset:
+                    if not self._is_left_arm_dof(dof_i):
+                        continue
+                    prev = left_arm_cause_by_dof.get(dof_i)
+                    if (prev is None) or (dist < prev[0]):
+                        left_arm_cause_by_dof[dof_i] = (float(dist), name_a, name_b, float(d_val))
+
+        # finalize
+        self.lambda_vec[:] = lam
+        self.task.cost = self.lambda_vec.copy()
+
+        if self.log_every > 0 and (self._step % self.log_every == 0):
+            left_arm_dofs = [i for i in range(self.model.nv) if self._is_left_arm_dof(i)]
+
+            inc_rows = []
+            for i in left_arm_dofs:
+                old = float(self._prev_lam[i])
+                new = float(lam[i])
+                if new > old + 1e-12:
+                    inc_rows.append((new - old, i, old, new))
+
+            if len(inc_rows) == 0:
+                print(f"[ADAPT_DAMP][L-ARM] step={self._step} no change")
+            else:
+                inc_rows.sort(reverse=True, key=lambda x: x[0])
+                top = inc_rows[: self.log_topk]
+
+                print(f"[ADAPT_DAMP][L-ARM] step={self._step} changed={len(inc_rows)}/{len(left_arm_dofs)}")
+                for _, dof_i, old, new in top:
+                    jname = self._joint_and_dof_label(dof_i)  # dof->joint name
+                    cause = left_arm_cause_by_dof.get(dof_i)
+
+                    if cause is None:
+                        print(f"  dof[{dof_i:02d}] {jname}: {old:.3f} -> {new:.3f}")
+                    else:
+                        dist, ga, gb, dv = cause
+                        print(
+                            f"  dof[{dof_i:02d}] {jname}: {old:.3f} -> {new:.3f} | "
+                            f"cause={ga} <-> {gb} (dist={dist:.4f}, d_val={dv:.3f})"
+                        )
+
+        self._prev_lam[:] = lam
+
+    def _is_left_arm_dof(self, dof_i: int) -> bool:
+        j_id = int(self.model.dof_jntid[dof_i])
+        j_name = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_JOINT, j_id) or ""
+        return any(j_name.startswith(p) for p in self._left_arm_joint_prefixes)
+
+    def _get_affected_dofs(self, id_a, id_b):
+        body_a = self.model.geom_bodyid[id_a]
+        body_b = self.model.geom_bodyid[id_b]
+
+        dofs = set()
+        for b_id in [body_a, body_b]:
+            curr = b_id
+            while curr > 1:
+                jnt_adr = self.model.body_jntadr[curr]
+                for k in range(self.model.body_jntnum[curr]):
+                    j_id = jnt_adr + k
+                    d_adr = self.model.jnt_dofadr[j_id]
+                    j_type = self.model.jnt_type[j_id]
+                    d_num = {mj.mjtJoint.mjJNT_FREE: 6, mj.mjtJoint.mjJNT_BALL: 3}.get(j_type, 1)
+                    dofs.update(range(d_adr, d_adr + d_num))
+                curr = self.model.body_parentid[curr]
+        return list(dofs)
+
+
+def compute_cam_yaw_jacobian(model, data, root_body_id=1):
+    nv = model.nv
+    J_yaw = np.zeros(nv)
+
+    qvel_orig = data.qvel.copy()
+    qacc_orig = data.qacc.copy()
+
+    for i in range(nv):
+        data.qvel[:] = 0.0
+        data.qacc[:] = 0.0
+        data.qvel[i] = 1.0
+
+        mj.mj_fwdVelocity(model, data)
+        mj.mj_subtreeVel(model, data)
+
+        J_yaw[i] = data.subtree_angmom[root_body_id][2]
+
+    data.qvel[:] = qvel_orig
+    data.qacc[:] = qacc_orig
+    mj.mj_forward(model, data)
+
+    return J_yaw.reshape(1, -1)
+
+class CentroidalYawTask(mink.Task):
+    def __init__(self, model, weight=1.0, root_body_id=1):
+        super().__init__(cost=np.array([float(weight)])) 
+        self.model = model
+        self.root_body_id = root_body_id
+        self._dbg_count = 0
+
+    
+    def compute_jacobian(self, configuration):
+        J = compute_cam_yaw_jacobian(self.model, configuration.data, self.root_body_id)
+        self._dbg_count += 1
+        if self._dbg_count % 100 == 0:
+            print(f"[CAM] cost={self.cost}, ||J||={np.linalg.norm(J):.4f}")
+        return J
+    def compute_error(self, configuration):
+        return np.zeros(1)
 
 class GeneralMotionRetargeting:
     """General Motion Retargeting (GMR).
@@ -22,6 +257,7 @@ class GeneralMotionRetargeting:
         damping: float=0.05, # Default value; will be overwritten by collision_cfg.yaml if provided.
         verbose: bool=True,
         use_velocity_limit: bool=False,
+        cam_weight: float = 1000.0
     ) -> None:
 
         # load the robot model
@@ -29,6 +265,13 @@ class GeneralMotionRetargeting:
         if verbose:
             print("Use robot model: ", self.xml_file)
         self.model = mj.MjModel.from_xml_path(self.xml_file)
+
+        self.total_steps = 0
+        self.performance_logs = []
+
+        self.cam_weight = cam_weight
+        self._dbg_count = 0
+
 
         # Print DoF names in order
         print("[GMR] Robot Degrees of Freedom (DoF) names and their order:")
@@ -47,6 +290,7 @@ class GeneralMotionRetargeting:
             self.robot_body_names[body_name] = i
             if verbose:
                 print(f"Body ID {i}: {body_name}")
+
         
         print("[GMR] Robot Motor (Actuator) names and their IDs:")
         self.robot_motor_names = {}
@@ -120,6 +364,7 @@ class GeneralMotionRetargeting:
         params = cfg.get('parameters', {})
         self.damping = params.get('damping', damping)
         self.max_iter = params.get('max_iter', 10)
+        self.damping_max = params.get('damping_max', self.damping * 50.0)
         
         if verbose:
             print(f"[GMR] Final Parameters ->  Damping: {self.damping}, Max Iterations: {self.max_iter}")
@@ -127,6 +372,8 @@ class GeneralMotionRetargeting:
         # Resolve collision groups and individual geometries
         self.groups = cfg['groups']
         self.all_collision_limits = []
+        self.limit_name_by_id = {}
+
 
         # Iterate through defined collision pairs and register them as IK limits
         for limit_cfg in cfg['collision_limits']:
@@ -146,17 +393,40 @@ class GeneralMotionRetargeting:
                 collision_detection_distance=limit_cfg['detect_dist'],
                 gain=limit_cfg.get('gain', 500.0),
             )
-            
+
             self.ik_limits.append(limit_obj)
             self.all_collision_limits.append(limit_obj)
+            self.limit_name_by_id[id(limit_obj)] = limit_cfg.get("name", "unnamed")
         
         self.setup_retarget_configuration()
         self.ground_offset = 0.0
+        self.floor_gid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "floor")
+        self.left_foot_gid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "Left_Foot")
+        self.right_foot_gid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "Right_Foot")
+
+        assert self.floor_gid != -1, "geom 'floor' not found"
+        assert self.left_foot_gid != -1, "geom 'Left_Foot' not found"
+        assert self.right_foot_gid != -1, "geom 'Right_Foot' not found"
+
+        self.adaptive_damping = AdaptiveJointDamping(
+            self.model,
+            self.all_collision_limits,
+            d_min=self.damping,
+            d_max=self.damping_max,
+            log_every=20,
+            log_topk=10,
+            verbose_pairs=True,
+            name_by_limit=self.limit_name_by_id
+        )
+
+
 
     def setup_retarget_configuration(self):
         self.configuration = mink.Configuration(self.model)
         self.tasks1 = []
-        self.tasks2 = []
+        # self.tasks2 = []
+        self.tasks2_targets = []
+        self.tasks2_solver = [] 
         
         # reset mappings
         self.human_body_to_task1 = {}
@@ -181,8 +451,8 @@ class GeneralMotionRetargeting:
             task = mink.FrameTask(
                 frame_name=frame_name,
                 frame_type="body",
-                position_cost=pos_weight,
-                orientation_cost=rot_weight,
+                position_cost=pos_weight*0.001,
+                orientation_cost=rot_weight*0.001,
                 lm_damping=1,
             )
             
@@ -217,9 +487,21 @@ class GeneralMotionRetargeting:
             self.pos_offsets2[body_name] = np.array(pos_offset) - self.ground
             self.rot_offsets2[body_name] = R.from_quat(rot_offset, scalar_first=True)
 
-            self.tasks2.append(task)
+            # self.tasks2.append(task)
+            # self.task_errors2[task] = []
+            self.tasks2_targets.append(task)
+            self.tasks2_solver.append(task)
             self.task_errors2[task] = []
+        root_body_name = "pelvis" 
+        root_body_id = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, root_body_name)
+        assert root_body_id != -1, f"Body '{root_body_name}' not found"
 
+        self.cam_yaw_task = CentroidalYawTask(
+            self.model,
+            weight=self.cam_weight,
+            root_body_id=root_body_id,
+        )
+        self.tasks2_solver.append(self.cam_yaw_task)
 
 
 
@@ -249,7 +531,7 @@ class GeneralMotionRetargeting:
                 task.set_target(mink.SE3.from_rotation_and_translation(mink.SO3(rot), pos))
 
         if self.use_ik_match_table2:
-            for task in self.tasks2:
+            for task in self.tasks2_targets:
                 body_name = self.task_to_human_body2[task]
                 if body_name not in human_data:
                     print(f"[WARN] human_data missing key for tasks2: {body_name}")
@@ -289,72 +571,73 @@ class GeneralMotionRetargeting:
 
     def retarget(self, human_data, offset_to_ground=False):
         self.update_targets(human_data, offset_to_ground)
-
         dt = self.configuration.model.opt.timestep
 
+
         if self.use_ik_match_table1 and len(self.tasks1) > 0:
+            num_iter = 0
             curr_error = self.error1()
 
-            vel1 = mink.solve_ik(
-                self.configuration,
-                self.tasks1,
-                dt,
-                self.solver,
-                self.damping,
-                limits=self.ik_limits,
-            )
-            self.configuration.integrate_inplace(vel1, dt)
-            next_error = self.error1()
-            num_iter = 0
+            while num_iter < self.max_iter:
+                self.adaptive_damping.update(self.configuration.data)
 
-            while abs(curr_error - next_error) > 1e-8 and num_iter < self.max_iter:
-                curr_error = next_error
-                dt = self.configuration.model.opt.timestep
                 vel1 = mink.solve_ik(
                     self.configuration,
-                    self.tasks1,
+                    self.tasks1 + [self.adaptive_damping.task], 
                     dt,
                     self.solver,
-                    self.damping,
+                    damping=0.0,
                     limits=self.ik_limits,
                 )
                 self.configuration.integrate_inplace(vel1, dt)
-                next_error = self.error1()          
+                next_error = self.error1()
+                
+                if abs(curr_error - next_error) < 1e-8:
+                    break
+                curr_error = next_error
                 num_iter += 1
-            # Log collision warnings for the final solution of Stage 1
+            
             self.log_collision_warning("Table1", num_iter)
 
-
-        if self.use_ik_match_table2 and len(self.tasks2) > 0:
+        if self.use_ik_match_table2 and len(self.tasks2_solver) > 0:
+            num_iter = 0
             curr_error = self.error2()
 
-            vel2 = mink.solve_ik(
-                self.configuration,
-                self.tasks2,
-                dt,
-                self.solver,
-                self.damping,
-                limits=self.ik_limits,
-            )
-            self.configuration.integrate_inplace(vel2, dt)
-            next_error = self.error2()
-            num_iter = 0
-            while abs(curr_error - next_error) > 1e-8 and num_iter < self.max_iter:
-                curr_error = next_error
-                dt = self.configuration.model.opt.timestep
+            while num_iter < self.max_iter:
+                self.adaptive_damping.update(self.configuration.data)
+
                 vel2 = mink.solve_ik(
                     self.configuration,
-                    self.tasks2,
+                    self.tasks2_solver + [self.adaptive_damping.task], 
                     dt,
                     self.solver,
-                    self.damping,
+                    damping=0.0,
                     limits=self.ik_limits,
                 )
+
+                if num_iter == 0:
+                    J_yaw = self.cam_yaw_task.compute_jacobian(self.configuration)
+                    predicted_cam = (J_yaw @ vel2)[0]
+                    self._dbg_count += 1
+                    if self._dbg_count % 10 == 0:
+                        print(f"[RESULT] Yaw CAM: {predicted_cam:.8f}")
+
                 self.configuration.integrate_inplace(vel2, dt)
                 next_error = self.error2()
+
+                if abs(curr_error - next_error) < 1e-8:
+                    break
+                curr_error = next_error
                 num_iter += 1
-            # Log collision warnings for the final solution of Stage 2 (Final Pose)
+
             self.log_collision_warning("Table2", num_iter)
+            perf = {"stage": "Table2", "iter": num_iter}
+            self.performance_logs.append(perf)
+
+        mj.mj_fwdPosition(self.model, self.configuration.data)
+        mj.mj_forward(self.model, self.configuration.data)
+        
+        # print("self.configuration.data.qpos: ", self.configuration.data.qpos)
 
         return self.configuration.data.qpos.copy()
 
@@ -380,7 +663,7 @@ class GeneralMotionRetargeting:
     def error2(self):
         errs = []
         unset = []
-        for task in self.tasks2:
+        for task in self.tasks2_targets:
             try:
                 errs.append(task.compute_error(self.configuration))
             except TargetNotSet:

@@ -26,19 +26,19 @@ collision_limits:
     pairs: [["Right_Upper_Leg","Left_Upper_Leg"]]
     margin: 0.02
     detect_dist: 0.1
-    gain: 0.1
+    gain: 0.01
 
   - name: "feet"
     pairs: [["l_foot", "r_foot"]]
-    margin: 0.02
-    detect_dist: 0.1
-    gain: 0.001
+    margin: 0.015
+    detect_dist: 0.13
+    gain: 0.0001
 
   - name: "shin"
     pairs: [["Left_Lower_Leg", "Right_Lower_Leg"]]
     margin: 0.05
     detect_dist: 0.1
-    gain: 0.1
+    gain: 0.01
 
   - name: "body_general"
     pairs: 
@@ -55,5 +55,5 @@ collision_limits:
       - ["r_lower_leg_foot", "torso"]
     margin: 0.05
     detect_dist: 0.1
-    gain: 0.1
+    gain: 0.01
   

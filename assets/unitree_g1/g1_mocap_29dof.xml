@@ -27,11 +27,17 @@
       <default class="cls_rarm">
         <geom contype="8" conaffinity="119"/>
       </default>
+
       <default class="cls_lleg">
-        <geom contype="16" conaffinity="111"/>
+        <geom contype="16" conaffinity="160"/>
       </default>
+
       <default class="cls_rleg">
-        <geom contype="32" conaffinity="95"/>
+        <geom contype="32" conaffinity="144"/>
+      </default>
+
+      <default class="cls_ground">
+        <geom contype="128" conaffinity="48"/>
       </default>
     </default>
   </default>
@@ -389,10 +395,16 @@
     <material name="geom" texture="texgeom" texuniform="true"/>
   </asset>
    <worldbody>
-    <geom name="floor" size="0 0 0.01" type="plane" material="groundplane" contype="1" conaffinity="0" priority="1"
-      friction="0.6" condim="3"/>
+    <geom name="floor" 
+        class="cls_ground" 
+        group="0"
+        type="plane" 
+        size="0 0 0.01" 
+        material="groundplane" 
+        friction="0.6" 
+        condim="3" 
+        priority="1"/>
 
-        <light diffuse=".5 .5 .5" pos="-3 -3 5" dir="3 3 -5" castshadow="true"/>
-
+  <light diffuse=".5 .5 .5" pos="-3 -3 5" dir="3 3 -5" castshadow="true"/>
   </worldbody>
 </mujoco>

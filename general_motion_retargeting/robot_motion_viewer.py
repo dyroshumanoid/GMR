@@ -55,7 +55,6 @@ class RobotMotionViewer:
                 video_height=480,
                 keyboard_callback=None,
                 ):
-        
         self.robot_type = robot_type
         self.xml_path = ROBOT_XML_DICT[robot_type]
         self.model = mj.MjModel.from_xml_path(str(self.xml_path))
@@ -122,7 +121,6 @@ class RobotMotionViewer:
         self.data.qpos[7:] = dof_pos
         
         mj.mj_forward(self.model, self.data)
-        
         if follow_camera:
             self.viewer.cam.lookat = self.data.xpos[self.model.body(self.robot_base).id]
             self.viewer.cam.distance = self.viewer_cam_distance
@@ -152,7 +150,7 @@ class RobotMotionViewer:
             self.renderer.update_scene(self.data, camera=self.viewer.cam)
             img = self.renderer.render()
             self.mp4_writer.append_data(img)
-    
+
     def close(self):
         self.viewer.close()
         time.sleep(0.5)

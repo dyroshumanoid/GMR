@@ -1,6 +1,7 @@
 # Robot body group definitions and self-collision limit parameters
 parameters:
   damping: 0.9
+  damping_max: 0.9
   max_iter: 10
 
 
@@ -16,10 +17,13 @@ groups:
   l_lower_leg_foot: ["Left_Lower_Leg", "Left_Lower_Leg2", "Left_Foot"]
   r_lower_leg_foot: ["Right_Lower_Leg", "Right_Lower_Leg2", "Right_Foot"]
 
+  l_upper_leg_foot: ["Left_Upper_Leg1", "Left_Upper_Leg2","Left_Lower_Leg", "Left_Lower_Leg2"]
+  r_upper_leg_foot: ["Right_Upper_Leg1", "Right_Upper_Leg2", "Right_Lower_Leg", "Right_Lower_Leg2"]
   l_arm: ["Left_Upper_Arm", "Left_Forearm", "Left_Elbow", "Left_Hand1", "Left_Hand2", "Left_Hand3"]
   r_arm: ["Right_Upper_Arm", "Right_Forearm", "Right_Elbow", "Right_Hand1", "Right_Hand2", "Right_Hand3"]
   l_leg: ["Left_Upper_Leg1", "Left_Upper_Leg2", "Left_Lower_Leg", "Left_Lower_Leg2", "Left_Foot"]
   r_leg: ["Right_Upper_Leg1", "Right_Upper_Leg2", "Right_Lower_Leg", "Right_Lower_Leg2", "Right_Foot"]
+  ground: ["floor"]
 
 
 collision_limits:
@@ -58,3 +62,32 @@ collision_limits:
     detect_dist: 0.1
     gain: 1.0
   
+  - name: "ground_collision"
+    pairs: 
+      - ["l_upper_leg_foot", "ground"]
+      - ["l_arm", "ground"]
+      - ["r_arm", "ground"]
+      # - ["r_leg", "ground"]
+      # - ["l_leg", "ground"]
+
+      - ["head", "ground"]
+      - ["r_upper_leg_foot", "ground"]
+      - ["torso", "ground"]
+    margin: 0.0001
+    detect_dist: 0.01
+    gain: 0.0001
+
+
+  # - name: "ground_foot"
+  #   pairs: 
+  #       - ["l_upper_leg_foot", "ground"]
+  #       - ["r_upper_leg_foot", "ground"]
+
+
+
+  #     - ["l_foot", "ground"]
+  #     - ["r_foot", "ground"]
+
+    # margin: 0.00001
+    # detect_dist: 0.08
+    # gain: 1000
