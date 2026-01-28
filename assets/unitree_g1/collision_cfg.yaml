@@ -1,11 +1,6 @@
 # Robot body group definitions and self-collision limit parameters
 parameters:
-<<<<<<< Updated upstream
-  damping: 0.9
-  damping_max: 0.9
-=======
   damping: 0.5
->>>>>>> Stashed changes
   max_iter: 10
   velocity_limit : 13
   cam_weight : 100

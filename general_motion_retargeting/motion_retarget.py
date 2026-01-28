@@ -8,204 +8,6 @@ from .params import ROBOT_XML_DICT, IK_CONFIG_DICT
 from rich import print
 from mink.exceptions import TargetNotSet
 from mink.tasks.damping_task import DampingTask
-<<<<<<< Updated upstream
-def cubic_hermite(time, time_0, time_f, x_0, x_f, x_dot_0=0.0, x_dot_f=0.0):
-
-    if time < time_0:
-        return float(x_0)
-    if time > time_f:
-        return float(x_f)
-
-    elapsed = time - time_0
-    T = time_f - time_0
-    T2 = T * T
-    T3 = T2 * T
-    dx = x_f - x_0
-
-    return float(
-        x_0
-        + x_dot_0 * elapsed
-        + (3 * dx / T2 - 2 * x_dot_0 / T - x_dot_f / T) * elapsed * elapsed
-        + (-2 * dx / T3 + (x_dot_0 + x_dot_f) / T2) * elapsed * elapsed * elapsed
-    )
-
-def damping_from_distance(dist, eps, detect_dist, d_min, d_max, slope_eps=0.0, slope_detect=0.0):
-
-    if detect_dist <= eps:
-        return float(d_max if dist <= eps else d_min)
-
-    return cubic_hermite(
-        time=dist,
-        time_0=eps,
-        time_f=detect_dist,
-        x_0=d_max,
-        x_f=d_min,
-        x_dot_0=slope_eps,
-        x_dot_f=slope_detect,
-    )
-
-
-class AdaptiveJointDamping:
-    def __init__(
-        self,
-        model,
-        all_collision_limits,
-        d_min,
-        d_max,
-        *,
-        log_every=200,
-        log_topk=12,
-        verbose_pairs=False,
-        concise_log=True,
-        round_digits=3,
-        name_by_limit=None,
-    ):
-        self.model = model
-        self.limits = all_collision_limits
-        self.d_min = float(d_min)
-        self.d_max = float(d_max)
-
-        self.lambda_vec = np.full(model.nv, self.d_min, dtype=float)
-        self.task = DampingTask(model, cost=self.lambda_vec.copy())
-        self._fromto = np.zeros(6, dtype=np.float64)
-
-        self._step = 0
-        self.log_every = int(log_every)
-        self.log_topk = int(log_topk)
-        self.verbose_pairs = bool(verbose_pairs)
-        self.name_by_limit = name_by_limit or {}
-        
-        self._prev_lam = self.lambda_vec.copy()
-        self.concise_log = bool(concise_log)
-        self.round_digits = int(round_digits)
-
-        self._left_arm_joint_prefixes = (
-            "left_shoulder_", "left_elbow_", "left_wrist_"
-        )
-
-    def _dof_to_joint_name(self, dof_i: int) -> str:
-        j_id = int(self.model.dof_jntid[dof_i])
-        name = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_JOINT, j_id)
-        return name if name is not None else f"joint#{j_id}"
-    
-    def _joint_and_dof_label(self, dof_i: int) -> str:
-        j_id = int(self.model.dof_jntid[dof_i])
-        j_name = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_JOINT, j_id)
-        if j_name is None:
-            j_name = f"joint#{j_id}"
-        return j_name
-
-
-    def update(self, data):
-        self._step += 1
-        mj.mj_fwdPosition(self.model, data)
-
-        lam = np.full(self.model.nv, self.d_min, dtype=float)
-
-
-        left_arm_cause_by_dof = {}
-
-        for li, limit_obj in enumerate(self.limits):
-            detect_dist = float(getattr(limit_obj, "collision_detection_distance"))
-            eps = float(getattr(limit_obj, "minimum_distance_from_collisions"))
-
-            for id_a, id_b in limit_obj.geom_id_pairs:
-                if id_a == -1 or id_b == -1:
-                    continue
-
-                dist = mj.mj_geomDistance(self.model, data, id_a, id_b, 8.0, self._fromto)
-                if dist >= detect_dist:
-                    continue
-
-                d_val = damping_from_distance(
-                    dist=dist, eps=eps, detect_dist=detect_dist,
-                    d_min=self.d_min, d_max=self.d_max
-                )
-
-                dof_subset = self._get_affected_dofs(id_a, id_b)
-                
-
-
-                lam[dof_subset] = np.maximum(lam[dof_subset], d_val)
-
-                name_a = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_GEOM, id_a) or f"geom#{id_a}"
-                name_b = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_GEOM, id_b) or f"geom#{id_b}"
-                # if "hand" in name_a.lower() or "hand" in name_b.lower():
-                #     print(f"\n[DEBUG_FOOT] Triggered by: {name_a} <-> {name_b}")
-                #     print(f"[DEBUG_FOOT] Affected Joint Names (Chain to Root):")
-                #     # DoF 인덱스를 Joint 이름으로 변환해서 출력
-                #     joint_names = sorted(list(set([self._dof_to_joint_name(d) for d in dof_subset])))
-                #     for j_name in joint_names:
-                #         print(f"  - {j_name}")
-                #     print("-" * 30)
-
-                for dof_i in dof_subset:
-                    if not self._is_left_arm_dof(dof_i):
-                        continue
-                    prev = left_arm_cause_by_dof.get(dof_i)
-                    if (prev is None) or (dist < prev[0]):
-                        left_arm_cause_by_dof[dof_i] = (float(dist), name_a, name_b, float(d_val))
-
-        # finalize
-        self.lambda_vec[:] = lam
-        self.task.cost = self.lambda_vec.copy()
-
-        if self.log_every > 0 and (self._step % self.log_every == 0):
-            left_arm_dofs = [i for i in range(self.model.nv) if self._is_left_arm_dof(i)]
-
-            inc_rows = []
-            for i in left_arm_dofs:
-                old = float(self._prev_lam[i])
-                new = float(lam[i])
-                if new > old + 1e-12:
-                    inc_rows.append((new - old, i, old, new))
-
-            if len(inc_rows) == 0:
-                print(f"[ADAPT_DAMP][L-ARM] step={self._step} no change")
-            else:
-                inc_rows.sort(reverse=True, key=lambda x: x[0])
-                top = inc_rows[: self.log_topk]
-
-                print(f"[ADAPT_DAMP][L-ARM] step={self._step} changed={len(inc_rows)}/{len(left_arm_dofs)}")
-                for _, dof_i, old, new in top:
-                    jname = self._joint_and_dof_label(dof_i)  # dof->joint name
-                    cause = left_arm_cause_by_dof.get(dof_i)
-
-                    if cause is None:
-                        print(f"  dof[{dof_i:02d}] {jname}: {old:.3f} -> {new:.3f}")
-                    else:
-                        dist, ga, gb, dv = cause
-                        print(
-                            f"  dof[{dof_i:02d}] {jname}: {old:.3f} -> {new:.3f} | "
-                            f"cause={ga} <-> {gb} (dist={dist:.4f}, d_val={dv:.3f})"
-                        )
-
-        self._prev_lam[:] = lam
-
-    def _is_left_arm_dof(self, dof_i: int) -> bool:
-        j_id = int(self.model.dof_jntid[dof_i])
-        j_name = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_JOINT, j_id) or ""
-        return any(j_name.startswith(p) for p in self._left_arm_joint_prefixes)
-
-    def _get_affected_dofs(self, id_a, id_b):
-        body_a = self.model.geom_bodyid[id_a]
-        body_b = self.model.geom_bodyid[id_b]
-
-        dofs = set()
-        for b_id in [body_a, body_b]:
-            curr = b_id
-            while curr > 1:
-                jnt_adr = self.model.body_jntadr[curr]
-                for k in range(self.model.body_jntnum[curr]):
-                    j_id = jnt_adr + k
-                    d_adr = self.model.jnt_dofadr[j_id]
-                    j_type = self.model.jnt_type[j_id]
-                    d_num = {mj.mjtJoint.mjJNT_FREE: 6, mj.mjtJoint.mjJNT_BALL: 3}.get(j_type, 1)
-                    dofs.update(range(d_adr, d_adr + d_num))
-                curr = self.model.body_parentid[curr]
-        return list(dofs)
-
-=======
 from mink.limits.limit import Limit, Constraint
 
 class CollisionBarrierTask(mink.Task):
@@ -311,7 +113,6 @@ def find_free_base_body_id(model: mj.MjModel):
         if model.jnt_type[j_id] == mj.mjtJoint.mjJNT_FREE:
             return int(model.jnt_bodyid[j_id])
     return -1
->>>>>>> Stashed changes
 
 def compute_cam_yaw_jacobian(model, data, root_body_id=1):
     nv = model.nv
@@ -467,9 +268,6 @@ class GeneralMotionRetargeting:
         params = cfg.get('parameters', {})
         self.damping = params.get('damping', damping)
         self.max_iter = params.get('max_iter', 10)
-<<<<<<< Updated upstream
-        self.damping_max = params.get('damping_max', self.damping * 50.0)
-=======
         self.vel_limit = params.get('velocity_limit', 10)
         self.cam_cost = params.get('cam_weight', 100)
         self.collision_weight = params.get('collision_avoidance_weight', 1.0)
@@ -493,7 +291,6 @@ class GeneralMotionRetargeting:
 
 
 
->>>>>>> Stashed changes
         
         if verbose:
             print(f"[GMR] Final Parameters ->  Damping: {self.damping}, Max Iterations: {self.max_iter}")
@@ -551,17 +348,6 @@ class GeneralMotionRetargeting:
         assert self.floor_gid != -1, "geom 'floor' not found"
 
 
-
-        self.adaptive_damping = AdaptiveJointDamping(
-            self.model,
-            self.all_collision_limits,
-            d_min=self.damping,
-            d_max=self.damping_max,
-            log_every=20,
-            log_topk=10,
-            verbose_pairs=True,
-            name_by_limit=self.limit_name_by_id
-        )
 
 
 
@@ -734,18 +520,10 @@ class GeneralMotionRetargeting:
             curr_error = self.error1()
 
             while num_iter < self.max_iter:
-<<<<<<< Updated upstream
-                self.adaptive_damping.update(self.configuration.data)
-
-                vel1 = mink.solve_ik(
-                    self.configuration,
-                    self.tasks1 + [self.adaptive_damping.task], 
-=======
                 self.collision_barrier_task.update(self.configuration)
                 vel1 = mink.solve_ik(
                     self.configuration,
                     self.tasks1_solver, 
->>>>>>> Stashed changes
                     dt,
                     self.solver,
                     damping=0.0,
@@ -768,15 +546,10 @@ class GeneralMotionRetargeting:
 
 
             while num_iter < self.max_iter:
-<<<<<<< Updated upstream
-                self.adaptive_damping.update(self.configuration.data)
-
-=======
                 self.collision_barrier_task.update(self.configuration)
->>>>>>> Stashed changes
                 vel2 = mink.solve_ik(
                     self.configuration,
-                    self.tasks2_solver + [self.adaptive_damping.task], 
+                    self.tasks2_solver, 
                     dt,
                     self.solver,
                     damping=0.0,
