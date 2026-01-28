@@ -29,10 +29,13 @@
                 <geom contype="8" conaffinity="119"/>
             </default>
             <default class="cls_lleg">
-                <geom contype="16" conaffinity="111"/>
+                <geom contype="16" conaffinity="160"/>
             </default>
             <default class="cls_rleg">
-                <geom contype="32" conaffinity="95"/>
+                <geom contype="32" conaffinity="144"/>
+            </default>
+            <default class="cls_ground">
+                <geom contype="128" conaffinity="48"/>
             </default>
         </default>
 
@@ -105,20 +108,29 @@
         <mesh name="head" file="head_revised.STL"/>
         <mesh name="hand" file="wrist2joint.STL" scale="0.001 0.001 0.001"/>
         <mesh name="Foot_Link" file="Foot_Link.STL"/>
-
+        
         <texture type="skybox" builtin="gradient" width="128" height="128" rgb1="0.4 0.6 0.8" rgb2="0 0 0"/>
         <texture name="texgeom" type="cube" builtin="flat" mark="cross" width="128" height="128" rgb1="0.6 0.6 0.6" rgb2="0.6 0.6 0.6" markrgb="1 1 1"/>
         <texture name="texplane" type="2d" builtin="checker" rgb1=".4 .4 .4" rgb2=".6 .6 .6" width="512" height="512"/>
         <material name='geom' texture="texgeom" texuniform="true"/>
-        <material name='MatPlane' reflectance='0.3' texture="texplane" texrepeat="1 1" texuniform="true"/>
+        <material name='MatPlane' reflectance='0.6' texture="texplane" texrepeat="1 1" texuniform="true"/>
         <material name='MatPlane2' reflectance='0.3' />
     </asset>
+    <visual>
+        <headlight diffuse="2.0 2.0 2.0" specular="1.0 1.0 1.0" ambient="0 0 0"/>
+    </visual>
+        
 
     <worldbody>
-        <geom name="ground" type="plane" pos="0 0 0" size="10 10 .05"
-            rgba="0.7 0.6 0.5 1" material="MatPlane2" friction="0.8 0.8 0.8" group="3"
-            contype="64" conaffinity="63"/>        <light directional="true" diffuse=".8 .8 .8" pos="0 0 10" dir="0 0 -10"/>
-        <light directional="true" diffuse=".3 .3 .3" pos="10 -10 5" dir="-10 10 -5"/>
+        <geom name="floor" 
+            class="cls_ground" 
+            group="0"
+            type="plane" 
+            size="0 0 0.01" 
+            material="MatPlane" 
+            friction="0.6" 
+            condim="3" 
+            priority="1"/>
 
         <body name="base_link">
             <joint name="virtual_joint" type="free" limited='false' frictionloss="0" damping="0" stiffness="0" armature="0"/>

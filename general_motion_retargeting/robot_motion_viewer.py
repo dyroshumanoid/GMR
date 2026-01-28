@@ -121,6 +121,7 @@ class RobotMotionViewer:
         self.data.qpos[7:] = dof_pos
         
         mj.mj_forward(self.model, self.data)
+
         if follow_camera:
             self.viewer.cam.lookat = self.data.xpos[self.model.body(self.robot_base).id]
             self.viewer.cam.distance = self.viewer_cam_distance
