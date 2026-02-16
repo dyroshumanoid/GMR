@@ -25,8 +25,8 @@ if __name__ == "__main__":
     
     env = RobotMotionViewer(robot_type=robot_type,
                             motion_fps=motion_fps,
-                            camera_follow=False,
-                            record_video=args.record_video, video_path=args.video_path)
+                            camera_follow=True,
+                            record_video=args.rescord_video, video_path=args.video_path)
     
     frame_idx = 0
     while True:

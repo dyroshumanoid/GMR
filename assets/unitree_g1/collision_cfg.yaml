@@ -4,7 +4,7 @@ parameters:
   max_iter: 10
   velocity_limit : 13
   cam_weight : 100
-  collision_avoidance_weight : 0.25
+  collision_avoidance_weight : 1.3
 
 
 groups:
@@ -76,20 +76,20 @@ collision_limits:
       - ["r_upper_leg_foot", "ground"]
       - ["torso", "ground"]
     margin: 0.0001
-    detect_dist: 0.01
+    detect_dist: 0.05
     gain: 0.0001
 
 
-  # - name: "ground_foot"
-  #   pairs: 
-  #       - ["l_upper_leg_foot", "ground"]
-  #       - ["r_upper_leg_foot", "ground"]
+  - name: "ground_foot"
+    pairs: 
+        - ["l_upper_leg_foot", "ground"]
+        - ["r_upper_leg_foot", "ground"]
 
 
 
-  #     - ["l_foot", "ground"]
-  #     - ["r_foot", "ground"]
+        - ["l_foot", "ground"]
+        - ["r_foot", "ground"]
 
-    # margin: 0.00001
-    # detect_dist: 0.08
-    # gain: 1000
+    margin: 0.0000001
+    detect_dist: 0.01
+    gain: 1000

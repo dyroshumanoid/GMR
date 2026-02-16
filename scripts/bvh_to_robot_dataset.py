@@ -1,158 +1,190 @@
 import argparse
 import pathlib
 import os
-import mujoco as mj
-import numpy as np
-from tqdm import tqdm
-import torch
+import time
 import pickle
 
-from general_motion_retargeting.utils.lafan1 import load_lafan1_file
+import mujoco as mj
+import numpy as np
+import torch
+from tqdm import tqdm
+from rich import print
+
+from general_motion_retargeting.utils.lafan1 import load_bvh_file as load_lafan1_file
 from general_motion_retargeting.kinematics_model import KinematicsModel
 from general_motion_retargeting import GeneralMotionRetargeting as GMR
-from rich import print
+
+
+def collect_bvh_files(src_folder: str):
+    bvh_files = []
+    for dirpath, _, filenames in os.walk(src_folder):
+        for fn in filenames:
+            if fn.lower().endswith(".bvh"):  # 대문자 확장자 방지
+                bvh_files.append(os.path.join(dirpath, fn))
+    bvh_files.sort()
+    return bvh_files
+
+
+def process_one_bvh(bvh_file_path: str, tgt_file_path: str, robot: str,
+                    frame_stride: int, max_frames: int):
+    # Load BVH
+    lafan1_data_frames, actual_human_height = load_lafan1_file(bvh_file_path)
+    src_fps = 30
+
+    if frame_stride and frame_stride > 1:
+        lafan1_data_frames = lafan1_data_frames[::frame_stride]
+        src_fps = int(round(src_fps / frame_stride))
+
+    if max_frames and max_frames > 0:
+        lafan1_data_frames = lafan1_data_frames[:max_frames]
+
+    num_frames = len(lafan1_data_frames)
+    if num_frames == 0:
+        raise RuntimeError("No frames after slicing")
+
+    # Init retarget
+    retarget = GMR(
+        src_human="bvh_lafan1",
+        tgt_robot=robot,
+        actual_human_height=actual_human_height,
+    )
+
+    # (unused but keep)
+    _model = mj.MjModel.from_xml_path(retarget.xml_file)
+    _data = mj.MjData(_model)
+
+    # Retarget per frame
+    qpos_list = []
+    t0 = time.time()
+
+    frame_pbar = tqdm(
+        enumerate(lafan1_data_frames),
+        total=num_frames,
+        desc=f"Frames ({os.path.basename(bvh_file_path)})",
+        unit="frame",
+        leave=False,
+        mininterval=0.2,
+    )
+
+    for i, smplx_data in frame_pbar:
+        qpos = retarget.retarget(smplx_data)
+        qpos_list.append(qpos.copy())
+
+        elapsed = time.time() - t0
+        fps_eff = (i + 1) / max(elapsed, 1e-9)
+        eta_sec = (num_frames - (i + 1)) / max(fps_eff, 1e-9)
+        frame_pbar.set_postfix_str(f"{fps_eff:.2f} it/s, ETA {eta_sec/60:.1f}m")
+
+    qpos_list = np.asarray(qpos_list)
+
+    # FK
+    device = "cuda:0"
+    kinematics_model = KinematicsModel(retarget.xml_file, device=device)
+
+    root_pos = qpos_list[:, :3]
+    root_rot = qpos_list[:, 3:7]
+    root_rot[:, [0, 1, 2, 3]] = root_rot[:, [1, 2, 3, 0]]
+    dof_pos = qpos_list[:, 7:]
+
+    identity_root_pos = torch.zeros((num_frames, 3), device=device)
+    identity_root_rot = torch.zeros((num_frames, 4), device=device)
+    identity_root_rot[:, -1] = 1.0
+
+    local_body_pos, _ = kinematics_model.forward_kinematics(
+        identity_root_pos,
+        identity_root_rot,
+        torch.from_numpy(dof_pos).to(device=device, dtype=torch.float),
+    )
+    body_names = kinematics_model.body_names
+
+    motion_data = {
+        "root_pos": root_pos,
+        "root_rot": root_rot,
+        "dof_pos": dof_pos,
+        "local_body_pos": local_body_pos.detach().cpu().numpy(),
+        "fps": src_fps,
+        "link_body_list": body_names,
+    }
+
+    os.makedirs(os.path.dirname(tgt_file_path), exist_ok=True)
+    with open(tgt_file_path, "wb") as f:
+        pickle.dump(motion_data, f)
+
+    total_elapsed = time.time() - t0
+    return num_frames, src_fps, total_elapsed
 
 
 if __name__ == "__main__":
     HERE = pathlib.Path(__file__).parent
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--src_folder",
-        help="Folder containing BVH motion files to load.",
-        required=True,
-        type=str,
-    )
-    
-    parser.add_argument(
-        "--tgt_folder",
-        help="Folder to save the retargeted motion files.",
-        default="../../motion_data/LAFAN1_g1_gmr"
-    )
-    
-    parser.add_argument(
-        "--robot",
-        default="unitree_g1",
-    )
-    
-    parser.add_argument(
-        "--override",
-        default=False,
-        action="store_true",
-    )
-    
-    parser.add_argument(
-        "--target_fps",
-        default=30,
-        type=int,
-    )
+
+    # 둘 중 하나만 받기
+    parser.add_argument("--bvh_file", type=str, default=None,
+                        help="Single BVH file to process.")
+    parser.add_argument("--src_folder", type=str, default=None,
+                        help="Folder containing BVH files (process all).")
+
+    # 저장 경로: 단일은 save_path, 폴더는 tgt_folder
+    parser.add_argument("--save_path", type=str, default=None,
+                        help="Output pkl path for single-file mode.")
+    parser.add_argument("--tgt_folder", type=str, default="results",
+                        help="Output root folder for folder mode.")
+
+    parser.add_argument("--robot", default="unitree_g1", type=str)
+    parser.add_argument("--override", action="store_true")
+
+    # 테스트 옵션
+    parser.add_argument("--max_files", default=0, type=int)
+    parser.add_argument("--max_frames", default=0, type=int)
+    parser.add_argument("--frame_stride", default=1, type=int)
 
     args = parser.parse_args()
-    
-    src_folder = args.src_folder
-    tgt_folder = args.tgt_folder
 
-   
-   
-        
-    # walk over all files in src_folder
-    for dirpath, _, filenames in os.walk(src_folder):
-        for filename in tqdm(sorted(filenames), desc="Retargeting files"):
-            if not filename.endswith(".bvh"):
-                continue
-                
-            # get the bvh file path
-            bvh_file_path = os.path.join(dirpath, filename)
-            
-            # get the target file path
-            tgt_file_path = bvh_file_path.replace(src_folder, tgt_folder).replace(".bvh", ".pkl")
+    # 입력 모드 검증 (parse_args 이후!)
+    if (args.bvh_file is None) == (args.src_folder is None):
+        raise ValueError("Provide exactly one of --bvh_file or --src_folder")
+
+    # --------- 단일 파일 모드 ----------
+    if args.bvh_file:
+        if args.save_path is None:
+            raise ValueError("--save_path is required when using --bvh_file")
+
+        if os.path.exists(args.save_path) and not args.override:
+            print(f"[yellow]Skip (exists): {args.save_path}[/yellow]")
+        else:
+            nframes, fps, tel = process_one_bvh(
+                args.bvh_file, args.save_path, args.robot,
+                args.frame_stride, args.max_frames
+            )
+            print(f"[green]Saved[/green]: {args.save_path} | frames={nframes} | fps={fps} | time={tel:.1f}s")
+
+    # --------- 폴더 모드 ----------
+    else:
+        bvh_files = collect_bvh_files(args.src_folder)
+        if args.max_files and args.max_files > 0:
+            bvh_files = bvh_files[:args.max_files]
+
+        if len(bvh_files) == 0:
+            raise RuntimeError(f"No .bvh files found under: {args.src_folder}")
+
+        print(f"[bold]Found {len(bvh_files)} BVH files[/bold]")
+
+        for bvh_file_path in tqdm(bvh_files, desc="Files", unit="file"):
+            rel_path = os.path.relpath(bvh_file_path, args.src_folder)
+            tgt_file_path = os.path.join(args.tgt_folder, os.path.splitext(rel_path)[0] + ".pkl")
 
             if os.path.exists(tgt_file_path) and not args.override:
-                print(f"Skipping {bvh_file_path} because {tgt_file_path} exists")
+                tqdm.write(f"Skipping (exists): {tgt_file_path}")
                 continue
-            
-            # Load LAFAN1 trajectory
+
             try:
-                lafan1_data_frames, actual_human_height = load_lafan1_file(bvh_file_path)
-                src_fps = 30  # LAFAN1 data is typically 30 FPS
-            except Exception as e:
-                print(f"Error loading {bvh_file_path}: {e}")
-                continue
-
-            
-            # Initialize the retargeting system
-            retarget = GMR(
-                src_human="bvh",
-                tgt_robot=args.robot,
-                actual_human_height=actual_human_height,
-            )
-            model = mj.MjModel.from_xml_path(retarget.xml_file)
-            data = mj.MjData(model)
-
-            
-
-            # retarget to get all qpos
-            qpos_list = []
-            for curr_frame in range(len(lafan1_data_frames)):
-                smplx_data = lafan1_data_frames[curr_frame]
-                
-                # Retarget till convergence
-                qpos = retarget.retarget(smplx_data)
-                
-                qpos_list.append(qpos.copy())
-            
-            qpos_list = np.array(qpos_list)
-
-            # Initialize the forward kinematics
-            device = "cuda:0"
-            kinematics_model = KinematicsModel(retarget.xml_file, device=device)
-            
-            root_pos = qpos_list[:, :3]
-            root_rot = qpos_list[:, 3:7]
-            root_rot[:, [0, 1, 2, 3]] = root_rot[:, [1, 2, 3, 0]]
-            dof_pos = qpos_list[:, 7:]
-            num_frames = root_pos.shape[0]
-            
-            # obtain local body pos
-            identity_root_pos = torch.zeros((num_frames, 3), device=device)
-            identity_root_rot = torch.zeros((num_frames, 4), device=device)
-            identity_root_rot[:, -1] = 1.0
-            local_body_pos, _ = kinematics_model.forward_kinematics(
-                identity_root_pos, 
-                identity_root_rot, 
-                torch.from_numpy(dof_pos).to(device=device, dtype=torch.float)
-            )
-            body_names = kinematics_model.body_names
-
-            HEIGHT_ADJUST = False
-            PERFRAME_ADJUST = False
-            if HEIGHT_ADJUST:
-                body_pos, _ = kinematics_model.forward_kinematics(
-                    torch.from_numpy(root_pos).to(device=device, dtype=torch.float),
-                    torch.from_numpy(root_rot).to(device=device, dtype=torch.float),
-                    torch.from_numpy(dof_pos).to(device=device, dtype=torch.float)
+                nframes, fps, tel = process_one_bvh(
+                    bvh_file_path, tgt_file_path, args.robot,
+                    args.frame_stride, args.max_frames
                 )
-                ground_offset = 0.00
-                if not PERFRAME_ADJUST:
-                    lowest_height = torch.min(body_pos[..., 2]).item()
-                    root_pos[:, 2] = root_pos[:, 2] - lowest_height + ground_offset
-                else:
-                    for i in range(root_pos.shape[0]):
-                        lowest_body_part = torch.min(body_pos[i, :, 2])
-                        root_pos[i, 2] = root_pos[i, 2] - lowest_body_part + ground_offset
+                tqdm.write(f"Saved: {tgt_file_path} | frames={nframes} | fps={fps} | time={tel:.1f}s")
+            except Exception as e:
+                tqdm.write(f"[ERROR] {bvh_file_path}: {e}")
 
-            motion_data = {
-                "root_pos": root_pos,
-                "root_rot": root_rot,
-                "dof_pos": dof_pos,
-                "local_body_pos": local_body_pos.detach().cpu().numpy(),
-                "fps": src_fps,
-                "link_body_list": body_names,
-            }
-            
-
-            os.makedirs(os.path.dirname(tgt_file_path), exist_ok=True)
-            with open(tgt_file_path, "wb") as f:
-                pickle.dump(motion_data, f)
-
-    print("Done. saved to ", tgt_folder)
+        print("Done. saved to ", args.tgt_folder)

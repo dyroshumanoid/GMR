@@ -103,7 +103,7 @@ if __name__ == "__main__":
                                             transparent_robot=1,
                                             record_video=args.record_video,
                                             video_path=args.video_path,
-                                            camera_follow=False,
+                                            camera_follow=True,
                                             # video_width=2080,
                                             # video_height=1170
                                             )

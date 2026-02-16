@@ -145,7 +145,7 @@ if __name__ == "__main__":
             dof_pos=qpos[7:],
             human_motion_data=retargeter.scaled_human_data,
             rate_limit=args.rate_limit,
-            follow_camera=False,
+            follow_camera=True,
             # human_pos_offset=np.array([0.0, 0.0, 0.0])
         )
 
