@@ -32,6 +32,8 @@ This repo is licensed under the [MIT License](LICENSE).
 
 
 # News & Updates
+- **2026-01-21:** GMR now supports [Xsens](https://www.xsens.com/) BVH offline data.
+- **2026-01-12:** GMR now supports [Fourier GR3](https://www.fftai.com/), the 17th humanoid robot in the repo.
 - **2025-12-02:** GMR now supports [TWIST2](https://yanjieze.com/TWIST2), which utilizes [XRoboToolkit SDK](https://github.com/XR-Robotics/XRoboToolkit-PC-Service).
 - **2025-11-17:** To join our community for discussions, you can add my WeChat contact [QR Code](https://yanjieze.com/TWIST2/images/my_wechat.jpg) with info like "[GMR] [Your Name] [Your Affiliation]".
 - **2025-11-08:** [MimicKit] from Jason Peng now supports GMR format. Check [here](https://github.com/xbpeng/MimicKit/tree/main/tools/gmr_to_mimickit).
@@ -168,9 +170,10 @@ This repo is licensed under the [MIT License](LICENSE).
 | 14 | PND Adam Lite `pnd_adam_lite`  | Leg (2\*6) + Waist (3) + Arm (2\*5) = 25 | ✅ | TBD | TBD | TBD |
 | 15 | Tienkung `tienkung`  | Leg (2\*6) + Arm (2\*4) = 20 | ✅ | TBD | TBD | TBD |
 | 16 | PAL Robotics' Talos `pal_talos`  | Head (2) + Arm (2\*7) + Waist (2) + Leg (2\*6) = 30 | ✅ | TBD | TBD | TBD |
+| 17 | Fourier GR3 `fourier_gr3`  | Head (2) + Arm (2\*7) + Waist (3) + Leg (2\*6) = 31 | ✅ | TBD | TBD | TBD |
 | More robots coming soon ! |
-| 16 | AgiBot A2 `agibot_a2` | TBD | TBD | TBD | TBD | TBD |
-| 17 | OpenLoong `openloong` | TBD | TBD | TBD | TBD | TBD |
+| 18 | AgiBot A2 `agibot_a2` | TBD | TBD | TBD | TBD | TBD |
+| 19 | OpenLoong `openloong` | TBD | TBD | TBD | TBD | TBD |
 
 
 
@@ -341,6 +344,83 @@ python scripts/bvh_to_robot_dataset.py --src_folder <path_to_dir_of_bvh_data> --
 ```
 
 By default there is no visualization for batch retargeting.
+
+
+
+## Retargeting from BVH (Xsens) to Robot
+
+#### Visualize bvh data using mujoco:
+
+Install PyQt6:
+```bash
+pip install PyQt6 PyQt6-Qt6 PyQt6-sip
+```
+
+
+```bash
+python general_motion_retargeting/utils/xsens_vendor/mujoco_xsens_bvh_view.py \
+  --bvh_file <path_to_dir_of_bvh_data> \
+  --scale <displacement scaling size> \
+  --reset_to_zero
+```
+like
+```bash
+python general_motion_retargeting/utils/xsens_vendor/mujoco_xsens_bvh_view.py \
+  --scale 0.01 \
+  --bvh_file assets/xsens_bvh_test/251021_04_boxing_120Hz_cm_3DsMax.bvh \
+  --reset_to_zero
+```
+
+- `--start` is used to specify the initial processing frame. If no input is given, processing will start from the first frame by default.
+
+- `--end` is used to specify the final processing frame. If not input, it will be processed by default to the last frame.
+
+- `--reset_to_zero` is used to reset the displacement and Z-axis rotation to zero.This function, when used in combination with `--start`, will set the data to the initial zero position very well.Because sometimes the first one or two frames of some datasets differ too much from the subsequent data, these data need to be discarded.
+
+- `--scale` is used to set the scaling value of the displacement, which depends on the relationship between the unit used for the displacement in the dataset and the meter.
+
+- ##### Before using it, you must install PyQt6. `pip install PyQt6`
+- ##### Upon executing this command, a UI interface will be launched, enabling you to adjust the angle values for each channel in the x, y, and z directions of every joint. After completing the adjustments, click the `"Apply and Preview"` button, which will generate an `offset.json` file locally and perform a MuJoCo visualization playback of the BVH file. When running `xsens_bvh_to_robot.py`, it will read the data from this JSON file. Therefore, you need to execute `mujoco_xsens_bvh_view.py` prior to using `xsens_bvh_to_robot.py` for motion retargeting, to ensure that the `offset.json` file exists locally.
+
+#### Retarget a single motion:
+```bash
+# single motion
+python scripts/xsens_bvh_to_robot.py \
+  --bvh_file <path_to_bvh_data> \
+  --robot <path_to_robot_data> \
+  --save_path <path_to_save_robot_data.pkl> \
+  --rate_limit \
+  --start <number of the first frame> \
+  --scale <displacement scaling size> \
+  --reset_to_zero \
+  --bvh_format <exported bvh format>
+```
+like
+```bash
+python scripts/xsens_bvh_to_robot.py  \
+  --robot unitree_h1_2 \
+  --scale 0.01 \
+  --reset_to_zero \
+  --bvh_format 3DSM \
+  --bvh_file assets/xsens_bvh_test/251021_04_boxing_120Hz_cm_3DsMax.bvh \
+  --save_path retargeting_data/h1/251021_04_boxing_120Hz_cm_3DsMax.pkl
+```
+##### By default you should see the visualization of the retargeted robot motion in a mujoco window. 
+- `--rate_limit` is used to limit the rate of the retargeted robot motion to keep the same as the human motion. If you want it as fast as possible, remove `--rate_limit`.
+
+- `--start` is used to specify the initial processing frame. If no input is given, processing will start from the first frame by default.
+
+- `--end` is used to specify the final processing frame. If not input, it will be processed by default to the last frame.
+
+- `--reset_to_zero` is used to reset the displacement and Z-axis rotation to zero.This function, when used in combination with `--start`, will set the data to the initial zero position very well.Because sometimes the first one or two frames of some datasets differ too much from the subsequent data, these data need to be discarded.
+
+- `--scale` is used to set the scaling value of the displacement, which depends on the relationship between the unit used for the displacement in the dataset and the meter.
+
+##### ！！！！！！！！！！！！！！！！！！ ATTENTION ！！！！！！！！！！！！！！！！！！！！
+- `--bvh_format` is used to set the format of the bvh being parsed. In the Xsens MVN software, BVH files in three formats can be exported. There will be some differences among BVH files in different formats. Here I recommend using the 3D Studio Max format.(In fact, I have not yet completed the parsing of data in other formats.)
+
+- The exported pkl file will represent quaternions in the `wxyz` format. ^ _ ^
+  
 
 ### Retargeting from FBX (OptiTrack) to Robot
 
