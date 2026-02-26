@@ -69,15 +69,17 @@ collision_limits:
       - ["l_upper_leg_foot", "ground"]
       - ["l_arm", "ground"]
       - ["r_arm", "ground"]
-      # - ["r_leg", "ground"]
-      # - ["l_leg", "ground"]
+      - ["r_leg", "ground"]
+      - ["l_leg", "ground"]
 
       - ["head", "ground"]
       - ["r_upper_leg_foot", "ground"]
       - ["torso", "ground"]
-    margin: 0.0001
+
+    margin: 0.01
     detect_dist: 0.05
-    gain: 0.0001
+    gain: 0.01
+
 
 
   - name: "ground_foot"
