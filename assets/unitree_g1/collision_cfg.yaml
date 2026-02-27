@@ -2,9 +2,8 @@
 parameters:
   damping: 0.5
   max_iter: 10
-  velocity_limit : 13
-  cam_weight : 100
-  collision_avoidance_weight : 1.3
+  velocity_limit : 9
+  collision_avoidance_weight : 0.7
 
 
 groups:
@@ -31,15 +30,16 @@ groups:
 collision_limits:
   - name: "feet"
     pairs: [["l_foot", "r_foot"]]
-    margin: 0.01
-    detect_dist: 0.1
-    gain: 1.0
+    
+    margin: 0.001
+    detect_dist: 0.3
+
 
   - name: "shin"
     pairs: [["Left_Lower_Leg", "Right_Lower_Leg"]]
-    margin: 0.01
-    detect_dist: 0.1
-    gain: 1.0
+
+    margin: 0.001
+    detect_dist: 0.3
 
   - name: "hands"
     pairs:
@@ -47,9 +47,9 @@ collision_limits:
       - ["l_hand_arm", "r_leg"]
       - ["r_hand_arm", "l_leg"]
       - ["r_hand_arm", "r_leg"]
-    margin: 0.01
-    detect_dist: 0.07
-    gain: 0.001
+    margin: 0.001
+    detect_dist: 0.3
+
 
   - name: "body_general"
     pairs: 
@@ -60,38 +60,20 @@ collision_limits:
       - ["head", "r_arm"]
       - ["l_lower_leg_foot", "torso"]
       - ["r_lower_leg_foot", "torso"]
-    margin: 0.03
-    detect_dist: 0.1
-    gain: 1.0
+
+    margin: 0.001
+    detect_dist: 0.3
+
   
   - name: "ground_collision"
     pairs: 
-      - ["l_upper_leg_foot", "ground"]
       - ["l_arm", "ground"]
       - ["r_arm", "ground"]
       - ["r_leg", "ground"]
       - ["l_leg", "ground"]
-
+      # - ["l_upper_leg_foot", "ground"]
+      # - ["r_upper_leg_foot", "ground"]
       - ["head", "ground"]
-      - ["r_upper_leg_foot", "ground"]
       - ["torso", "ground"]
-
-    margin: 0.01
-    detect_dist: 0.05
-    gain: 0.01
-
-
-
-  - name: "ground_foot"
-    pairs: 
-        - ["l_upper_leg_foot", "ground"]
-        - ["r_upper_leg_foot", "ground"]
-
-
-
-        - ["l_foot", "ground"]
-        - ["r_foot", "ground"]
-
-    margin: 0.0000001
-    detect_dist: 0.01
-    gain: 1000
+    margin: 0.001
+    detect_dist: 0.3

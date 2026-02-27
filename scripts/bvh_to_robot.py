@@ -145,7 +145,7 @@ if __name__ == "__main__":
             dof_pos=qpos[7:],
             human_motion_data=retargeter.scaled_human_data,
             rate_limit=args.rate_limit,
-            follow_camera=True,
+            follow_camera=True, #change to True if you want the camera to follow the robot
             # human_pos_offset=np.array([0.0, 0.0, 0.0])
         )
 

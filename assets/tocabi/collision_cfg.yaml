@@ -3,7 +3,6 @@ parameters:
   damping: 0.5
   max_iter: 10
   velocity_limit : 20
-  cam_weight : 100
   collision_avoidance_weight : 0.0
 
 groups:
@@ -32,19 +31,16 @@ collision_limits:
     pairs: [["Right_Upper_Leg","Left_Upper_Leg"]]
     margin: 0.001
     detect_dist: 0.03
-    gain: 0.01
 
   - name: "feet"
     pairs: [["l_foot", "r_foot"]]
     margin: 0.001
     detect_dist: 0.05
-    gain: 0.0001
 
   - name: "shin"
     pairs: [["Left_Lower_Leg", "Right_Lower_Leg"]]
     margin: 0.001
     detect_dist: 0.05
-    gain: 0.01
 
   - name: "body_general"
     pairs: 
@@ -61,7 +57,6 @@ collision_limits:
       - ["r_lower_leg_foot", "torso"]
     margin: 0.001
     detect_dist: 0.03
-    gain: 0.01
   
   - name: "ground_collision"
     pairs: 
@@ -76,4 +71,3 @@ collision_limits:
       - ["torso", "ground"]
     margin: 0.0001
     detect_dist: 0.01
-    gain: 0.0001
