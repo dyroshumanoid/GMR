@@ -3,8 +3,8 @@ import pathlib
 import os
 import time
 import pickle
+import gc
 
-import mujoco as mj
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -19,14 +19,20 @@ def collect_bvh_files(src_folder: str):
     bvh_files = []
     for dirpath, _, filenames in os.walk(src_folder):
         for fn in filenames:
-            if fn.lower().endswith(".bvh"):  # 대문자 확장자 방지
+            if fn.lower().endswith(".bvh"):
                 bvh_files.append(os.path.join(dirpath, fn))
     bvh_files.sort()
     return bvh_files
 
 
-def process_one_bvh(bvh_file_path: str, tgt_file_path: str, robot: str,
-                    frame_stride: int, max_frames: int):
+def process_one_bvh(
+    bvh_file_path: str,
+    tgt_file_path: str,
+    robot: str,
+    frame_stride: int,
+    max_frames: int,
+    device: str = "cuda:0",
+):
     # Load BVH
     lafan1_data_frames, actual_human_height = load_lafan1_file(bvh_file_path)
     src_fps = 30
@@ -49,10 +55,6 @@ def process_one_bvh(bvh_file_path: str, tgt_file_path: str, robot: str,
         actual_human_height=actual_human_height,
     )
 
-    # (unused but keep)
-    _model = mj.MjModel.from_xml_path(retarget.xml_file)
-    _data = mj.MjData(_model)
-
     # Retarget per frame
     qpos_list = []
     t0 = time.time()
@@ -63,7 +65,7 @@ def process_one_bvh(bvh_file_path: str, tgt_file_path: str, robot: str,
         desc=f"Frames ({os.path.basename(bvh_file_path)})",
         unit="frame",
         leave=False,
-        mininterval=0.2,
+        mininterval=0.5,  # reduce overhead
     )
 
     for i, smplx_data in frame_pbar:
@@ -77,13 +79,12 @@ def process_one_bvh(bvh_file_path: str, tgt_file_path: str, robot: str,
 
     qpos_list = np.asarray(qpos_list)
 
-    # FK
-    device = "cuda:0"
+    # FK (batched)
     kinematics_model = KinematicsModel(retarget.xml_file, device=device)
 
     root_pos = qpos_list[:, :3]
     root_rot = qpos_list[:, 3:7]
-    root_rot[:, [0, 1, 2, 3]] = root_rot[:, [1, 2, 3, 0]]
+    root_rot[:, [0, 1, 2, 3]] = root_rot[:, [1, 2, 3, 0]]  # wxyz -> xyzw
     dof_pos = qpos_list[:, 7:]
 
     identity_root_pos = torch.zeros((num_frames, 3), device=device)
@@ -111,6 +112,14 @@ def process_one_bvh(bvh_file_path: str, tgt_file_path: str, robot: str,
         pickle.dump(motion_data, f)
 
     total_elapsed = time.time() - t0
+
+    # aggressive cleanup (helps long batch runs)
+    del kinematics_model, local_body_pos, qpos_list
+    if device.startswith("cuda"):
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+    gc.collect()
+
     return num_frames, src_fps, total_elapsed
 
 
@@ -119,33 +128,27 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
-    # 둘 중 하나만 받기
-    parser.add_argument("--bvh_file", type=str, default=None,
-                        help="Single BVH file to process.")
-    parser.add_argument("--src_folder", type=str, default=None,
-                        help="Folder containing BVH files (process all).")
+    parser.add_argument("--bvh_file", type=str, default=None, help="Single BVH file to process.")
+    parser.add_argument("--src_folder", type=str, default=None, help="Folder containing BVH files (process all).")
 
-    # 저장 경로: 단일은 save_path, 폴더는 tgt_folder
-    parser.add_argument("--save_path", type=str, default=None,
-                        help="Output pkl path for single-file mode.")
-    parser.add_argument("--tgt_folder", type=str, default="results",
-                        help="Output root folder for folder mode.")
+    parser.add_argument("--save_path", type=str, default=None, help="Output pkl path for single-file mode.")
+    parser.add_argument("--tgt_folder", type=str, default="results", help="Output root folder for folder mode.")
 
     parser.add_argument("--robot", default="unitree_g1", type=str)
     parser.add_argument("--override", action="store_true")
 
-    # 테스트 옵션
     parser.add_argument("--max_files", default=0, type=int)
     parser.add_argument("--max_frames", default=0, type=int)
     parser.add_argument("--frame_stride", default=1, type=int)
 
+    # NEW: device selection
+    parser.add_argument("--device", default="cuda:0", type=str, help="FK device: cuda:0 or cpu")
+
     args = parser.parse_args()
 
-    # 입력 모드 검증 (parse_args 이후!)
     if (args.bvh_file is None) == (args.src_folder is None):
         raise ValueError("Provide exactly one of --bvh_file or --src_folder")
 
-    # --------- 단일 파일 모드 ----------
     if args.bvh_file:
         if args.save_path is None:
             raise ValueError("--save_path is required when using --bvh_file")
@@ -154,12 +157,15 @@ if __name__ == "__main__":
             print(f"[yellow]Skip (exists): {args.save_path}[/yellow]")
         else:
             nframes, fps, tel = process_one_bvh(
-                args.bvh_file, args.save_path, args.robot,
-                args.frame_stride, args.max_frames
+                args.bvh_file,
+                args.save_path,
+                args.robot,
+                args.frame_stride,
+                args.max_frames,
+                device=args.device,
             )
             print(f"[green]Saved[/green]: {args.save_path} | frames={nframes} | fps={fps} | time={tel:.1f}s")
 
-    # --------- 폴더 모드 ----------
     else:
         bvh_files = collect_bvh_files(args.src_folder)
         if args.max_files and args.max_files > 0:
@@ -180,8 +186,12 @@ if __name__ == "__main__":
 
             try:
                 nframes, fps, tel = process_one_bvh(
-                    bvh_file_path, tgt_file_path, args.robot,
-                    args.frame_stride, args.max_frames
+                    bvh_file_path,
+                    tgt_file_path,
+                    args.robot,
+                    args.frame_stride,
+                    args.max_frames,
+                    device=args.device,
                 )
                 tqdm.write(f"Saved: {tgt_file_path} | frames={nframes} | fps={fps} | time={tel:.1f}s")
             except Exception as e:

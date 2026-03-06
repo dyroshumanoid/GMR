@@ -50,12 +50,21 @@ class CollisionBarrierTask(mink.Task):
         self.collision_limits = collision_limits
         self.w_bar = float(w_bar)
         self.name = name
-        self.h_eps = 7e-4
+        self.h_eps = 1e-3  # small epsilon to prevent singularity when h is close to zero
         self._J = np.zeros((0, model.nv))
         self._e = np.zeros((0,))
         self._w = np.zeros((0,))
         self._fromto = np.zeros(6, dtype=np.float64)
 
+
+    def _relaxed_barrier_gradient(self, h: float) -> float:
+        delta = self.h_eps
+        if h >= delta:
+            # Log region: dB/dh = -1/h
+            return -1.0 / h
+        else:
+            # Quadratic region: dB/dh = (h - 2*delta) / delta^2
+            return (h - 2 * delta) / (delta ** 2)
 
     def update(self, configuration: mink.Configuration):
         model = self.model
@@ -96,12 +105,8 @@ class CollisionBarrierTask(mink.Task):
                     )
                 ).reshape(1, -1)
                 
-                # Log-barrier gradient: J_bar = -(1 / h) * J_h
-                h_eff = max(h, self.h_eps)
-                invh  = 1.0 / h_eff
-
-
-                J_bar = -invh * J_h
+                dBdh = self._relaxed_barrier_gradient(h)
+                J_bar = dBdh * J_h
 
                 e_bar = 0.0
                 J_rows.append(J_bar)
@@ -293,7 +298,7 @@ class GeneralMotionRetargeting:
             self.all_collision_limits.append(limit_obj)            
 
         self.setup_retarget_configuration()
-        self.ground_offset = 0.0
+        self.ground_offset = -0.01
         self.floor_gid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "floor")
         left_candidates  = ["Left_Foot", "Left_Inner_Foot", "Left_Outer_Foot"]
         right_candidates = ["Right_Foot", "Right_Inner_Foot", "Right_Outer_Foot"]

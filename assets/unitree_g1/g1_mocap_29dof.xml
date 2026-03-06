@@ -7,40 +7,35 @@
     <motor ctrlrange="-1 1" ctrllimited="true"/>
     <joint actuatorfrclimited="true" type="hinge"/>
     <geom contype="0" conaffinity="0" condim="3"/> 
+      <default class="cls">
+    <geom group="2" rgba="0.79216 0.81961 0.93333 0.5"/>
 
-    <default class="viz">
-      <geom contype="0" conaffinity="0" group="1" type="mesh" rgba=".6 .6 .7 1" />
+    <default class="cls_head">
+      <geom contype="1" conaffinity="255"/>
+    </default>
+    <default class="cls_torso">
+      <geom contype="2" conaffinity="255"/>
+    </default>
+    <default class="cls_larm">
+      <geom contype="4" conaffinity="255"/>
+    </default>
+    <default class="cls_rarm">
+      <geom contype="8" conaffinity="255"/>
+    </default>
+    <default class="cls_lleg">
+      <geom contype="16" conaffinity="255"/>
+    </default>
+    <default class="cls_rleg">
+      <geom contype="32" conaffinity="255"/>
     </default>
 
-    <default class="cls">
-      <geom group="2" rgba="0.79216 0.81961 0.93333 0.5"/>
-
-      <default class="cls_head">
-        <geom contype="1" conaffinity="126"/>
-      </default>
-      <default class="cls_torso">
-        <geom contype="2" conaffinity="125"/>
-      </default>
-      <default class="cls_larm">
-        <geom contype="4" conaffinity="123"/>
-      </default>
-      <default class="cls_rarm">
-        <geom contype="8" conaffinity="119"/>
-      </default>
-
-      <default class="cls_lleg">
-        <geom contype="16" conaffinity="160"/>
-      </default>
-
-      <default class="cls_rleg">
-        <geom contype="32" conaffinity="144"/>
-      </default>
-
-      <default class="cls_ground">
-        <geom contype="128" conaffinity="48"/>
-      </default>
+    <default class="cls_ground">
+      <geom contype="128" conaffinity="63"/>
     </default>
   </default>
+  </default>
+
+
 
   <asset>
     <mesh name="pelvis" file="pelvis.STL"/>
