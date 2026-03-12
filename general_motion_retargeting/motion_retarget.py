@@ -7,8 +7,11 @@ from scipy.spatial.transform import Rotation as R
 from .params import ROBOT_XML_DICT, IK_CONFIG_DICT
 from rich import print
 from mink.exceptions import TargetNotSet
+from mink.tasks import BaseTask, Objective
+from mink.limits.collision_avoidance_limit import compute_contact_normal_jacobian, Contact
 
-class CollisionBarrierTask(mink.Task):
+
+class CollisionBarrierTask(BaseTask):
     """
     Soft collision avoidance via a logarithmic barrier.
 
@@ -42,37 +45,34 @@ class CollisionBarrierTask(mink.Task):
         self,
         model: mj.MjModel,
         collision_limits,
-        w_bar: float = 0.0,
+        t: float = 0.15,
+        delta: float = 1e-3,
         name: str = "collision_barrier",
     ):
-        super().__init__(cost=np.zeros(0))
+        super().__init__()
         self.model = model
         self.collision_limits = collision_limits
-        self.w_bar = float(w_bar)
+        self.t=t
+        self.delta=delta
         self.name = name
-        self.h_eps = 1e-3  # small epsilon to prevent singularity when h is close to zero
-        self._J = np.zeros((0, model.nv))
-        self._e = np.zeros((0,))
-        self._w = np.zeros((0,))
         self._fromto = np.zeros(6, dtype=np.float64)
 
-
-    def _relaxed_barrier_gradient(self, h: float) -> float:
-        delta = self.h_eps
-        if h >= delta:
-            # Log region: dB/dh = -1/h
-            return -1.0 / h
+    def _barrier_derivative(self, h: float):
+        t, delta = self.t, self.delta
+        if h >=delta:
+            dBdh= -1.0 / (t*h)
+            d2Bdh2 = 1.0 / (t*h**2)
         else:
-            # Quadratic region: dB/dh = (h - 2*delta) / delta^2
-            return (h - 2 * delta) / (delta ** 2)
-
-    def update(self, configuration: mink.Configuration):
+            dBdh = (h-2.0*delta) / (t*delta**2)
+            d2Bdh2 = 1.0 / (t*delta**2)
+        return dBdh, d2Bdh2
+    
+    def compute_qp_objective(self, configuration: mink.Configuration) -> Objective:
         model = self.model
         data = configuration.data
-
-        J_rows = []
-        e_rows = []
-        w_rows = []
+        nv = model.nv
+        H_total = np.zeros((nv, nv))
+        c_total = np.zeros(nv)
 
         mj.mj_fwdPosition(model, data)
 
@@ -81,56 +81,38 @@ class CollisionBarrierTask(mink.Task):
             detect_dist = float(limit.collision_detection_distance)
 
             for geom_a, geom_b in limit.geom_id_pairs:
-                if geom_a < 0 or geom_b < 0:
+                if geom_a <0 or geom_b < 0:
                     continue
 
                 dist = mj.mj_geomDistance(model, data, geom_a, geom_b, detect_dist, self._fromto)
 
-                # Activate barrier only when inside the detection band (d < detect_dist)
                 if dist >= detect_dist:
                     continue
-                
-                # Safety function for barrier: h(q) = d(q) - d_min
-                h = float(dist - d_min)
 
-                # Contact normal Jacobian: J_h = ∂h/∂q
-                J_h = mink.limits.collision_avoidance_limit.compute_contact_normal_jacobian(
-                    model, data,
-                    mink.limits.collision_avoidance_limit.Contact(
-                        dist=dist,
-                        fromto=self._fromto.copy(),
-                        geom1=geom_a,
-                        geom2=geom_b,
-                        distmax=detect_dist,
-                    )
-                ).reshape(1, -1)
-                
-                dBdh = self._relaxed_barrier_gradient(h)
-                J_bar = dBdh * J_h
+                h=float(dist - d_min)
 
-                e_bar = 0.0
-                J_rows.append(J_bar)
-                e_rows.append(np.array([e_bar]))
-                w_rows.append(np.array([self.w_bar]))
+                contact = Contact(
+                    dist=dist,
+                    fromto=self._fromto.copy(),
+                    geom1=geom_a,
+                    geom2=geom_b,
+                    distmax=detect_dist,
+                )
 
-        if len(J_rows) == 0:
-            self._J = np.zeros((0, model.nv))
-            self._e = np.zeros((0,))
-            self._w = np.zeros((0,))
-            self.cost = self._w
-            return
+                J_AB = compute_contact_normal_jacobian(model, data, contact).reshape(1,nv)
+                dBdh, d2Bdh2 = self._barrier_derivative(h)
+                H_total += d2Bdh2 * (J_AB.T @ J_AB)
+                c_total += dBdh * J_AB.reshape(nv)
 
-        self._J = np.vstack(J_rows)
-        self._e = np.concatenate(e_rows)
-        self._w = np.concatenate(w_rows)
+        return Objective(H=H_total, c=c_total)
 
-        self.cost = self._w.copy()
 
-    def compute_jacobian(self, configuration):
-        return self._J
 
-    def compute_error(self, configuration):
-        return self._e
+
+
+
+
+
 
 def find_geoms(model, names):
     gids = []
@@ -398,7 +380,8 @@ class GeneralMotionRetargeting:
         self.collision_barrier_task = CollisionBarrierTask(
             model=self.model,
             collision_limits=self.all_collision_limits,
-            w_bar = self.collision_weight,
+            t=1.0/self.collision_weight,
+            delta=0.2,
         )
         self.tasks1_solver.append(self.collision_barrier_task)
         self.tasks2_solver.append(self.collision_barrier_task)
@@ -478,7 +461,7 @@ class GeneralMotionRetargeting:
 
         if not self._warmup_done:
             for _ in range(self._warmup_iters):
-                self.collision_barrier_task.update(self.configuration)
+                # self.collision_barrier_task.update(self.configuration)
                 vel = mink.solve_ik(
                     self.configuration,
                     self.tasks1_solver,
@@ -497,7 +480,7 @@ class GeneralMotionRetargeting:
 
             while num_iter < self.max_iter:
                 # Recompute barrier rows at the current q before each IK QP solve
-                self.collision_barrier_task.update(self.configuration)
+                # self.collision_barrier_task.update(self.configuration)
                 vel1 = mink.solve_ik(
                     self.configuration,
                     self.tasks1_solver, 
@@ -522,7 +505,7 @@ class GeneralMotionRetargeting:
 
 
             while num_iter < self.max_iter:
-                self.collision_barrier_task.update(self.configuration)
+                # self.collision_barrier_task.update(self.configuration)
                 vel2 = mink.solve_ik(
                     self.configuration,
                     self.tasks2_solver, 

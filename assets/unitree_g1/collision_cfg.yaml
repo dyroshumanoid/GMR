@@ -2,7 +2,7 @@
 parameters:
   damping: 0.5
   max_iter: 10
-  velocity_limit : 9
+  velocity_limit : 15
   collision_avoidance_weight : 0.15
 
 
