@@ -46,7 +46,7 @@ collision_limits:
 
   
   - name: "ground_collision"
-    pairs: 
+    pairs:
       - ["l_arm", "ground"]
       - ["r_arm", "ground"]
       - ["r_leg", "ground"]
@@ -55,3 +55,26 @@ collision_limits:
       - ["torso", "ground"]
     margin: 0.01
     detect_dist: 0.3
+
+
+# ── Foot contact zero-velocity constraint ─────────────────────────────────────
+# Contact detection is based on human motion position difference per frame:
+#   delta = ||human_pos_t - human_pos_{t-1}||
+# If delta <= threshold * dt  (i.e. human foot speed <= threshold),
+# a hard QP inequality pins the robot foot XY velocity to <= velocity_bound.
+# threshold is in m/s; velocity_bound is in m/s.
+# human_body_name is derived automatically from the IK config (format-agnostic).
+# ──────────────────────────────────────────────────────────────────────────────
+foot_contact:
+  enabled: true
+  # human_fps: 30     # Hz — frame rate of the human motion input (used to compute frame dt)
+  human_fps: 1     # Hz — frame rate of the human motion input (used to compute frame dt)
+  threshold: 0.01   # m/s (1 cm/s) — contact activates when human foot speed <= this
+  velocity_bound: 0.0 # m/s  — hard XY velocity limit once in contact
+
+  contact_points:
+    - body_name: "left_ankle_roll_link"
+      local_pos: [0.02, 0.0, -0.02]
+
+    - body_name: "right_ankle_roll_link"
+      local_pos: [0.02, 0.0, -0.02]

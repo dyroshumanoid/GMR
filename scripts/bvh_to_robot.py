@@ -84,14 +84,15 @@ if __name__ == "__main__":
     lafan1_data_frames, actual_human_height = load_bvh_file(args.bvh_file, format=args.format)
     
     
+    motion_fps = args.motion_fps
+
     # Initialize the retargeting system
     retargeter = GMR(
         src_human=f"bvh_{args.format}",
         tgt_robot=args.robot,
         actual_human_height=actual_human_height,
+        human_fps=motion_fps,
     )
-
-    motion_fps = args.motion_fps
     
     robot_motion_viewer = RobotMotionViewer(robot_type=args.robot,
                                             motion_fps=motion_fps,
@@ -144,6 +145,7 @@ if __name__ == "__main__":
             root_rot=qpos[3:7],
             dof_pos=qpos[7:],
             human_motion_data=retargeter.scaled_human_data,
+            contact_points=retargeter.get_contact_point_positions(),
             rate_limit=args.rate_limit,
             follow_camera=True, #change to True if you want the camera to follow the robot
             # human_pos_offset=np.array([0.0, 0.0, 0.0])

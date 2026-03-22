@@ -131,6 +131,98 @@ class CollisionBarrierTask(mink.Task):
     def compute_error(self, configuration):
         return self._e
 
+class FootContactLimit(mink.Limit):
+    """
+    Hard foot contact zero-velocity constraint, implemented as QP inequalities.
+
+    Contact detection is based on the human motion position difference per frame:
+
+        delta = ||human_pos_t - human_pos_{t-1}||
+
+    If  delta  <=  threshold * dt  (i.e. human foot speed <= threshold [m/s]):
+        Enforce  |J_c(q)[XY] @ v| <= velocity_bound   (hard QP inequality)
+
+    Two-sided bound  |J_c @ v| <= velocity_bound  in G @ v <= h form.
+    """
+    def __init__(
+        self,
+        model: mj.MjModel,
+        contact_points: list,       # list of (body_id, local_pos_np)
+        human_body_names: list,     # list of human body names, one per contact point
+        human_dt: float = 1.0/30,  # seconds between human motion frames (1/fps)
+        threshold: float = 0.01,    # m/s — contact activates when human foot speed <= threshold
+        velocity_bound: float = 0.0,
+        name: str = "foot_contact",
+    ):
+        self.model = model
+        self.contact_points = contact_points
+        self.human_body_names = human_body_names
+        self.human_dt = human_dt
+        self.threshold = threshold
+        self.velocity_bound = velocity_bound  # max contact-point XY velocity [m/s]
+        self.name = name
+        self._prev_human_pos = {}              # human_body_name -> np.ndarray(3,)
+        self._active_mask = [False] * len(contact_points)  # per-point contact state
+
+    def update_from_human_motion(self, human_data: dict):
+        """Update contact active mask from human motion position differences.
+
+        human_data: dict of {human_body_name: (pos, rot)} for the current frame
+        """
+        threshold_pos = self.threshold * self.human_dt  # convert m/s threshold to meters per frame
+        for i, human_name in enumerate(self.human_body_names):
+            if human_name not in human_data:
+                self._active_mask[i] = False
+                continue
+            curr_pos = human_data[human_name][0]  # (3,) position
+            if human_name in self._prev_human_pos:
+                delta = np.linalg.norm(curr_pos - self._prev_human_pos[human_name])
+                self._active_mask[i] = delta <= threshold_pos
+            else:
+                self._active_mask[i] = False  # no previous frame — cannot determine contact
+            self._prev_human_pos[human_name] = curr_pos.copy()
+
+    def compute_qp_inequalities(
+        self,
+        configuration: mink.Configuration,
+        dt: float,
+    ):
+        model = self.model
+        data = configuration.data
+
+        mj.mj_fwdPosition(model, data)
+
+        G_rows, h_rows = [], []
+        J_pos = np.zeros((3, model.nv))
+        J_rot = np.zeros((3, model.nv))
+
+        for i, (body_id, local_pos) in enumerate(self.contact_points):
+            if not self._active_mask[i]:
+                continue
+
+            body_xpos = data.xpos[body_id]
+            body_xmat = data.xmat[body_id].reshape(3, 3)
+            world_point = body_xpos + body_xmat @ local_pos
+
+            J_pos[:] = 0.0
+            J_rot[:] = 0.0
+            mj.mj_jac(model, data, J_pos, J_rot, world_point, body_id)
+
+            J_xy = J_pos[:2]               # XY rows only, (2, nv)
+            G_rows.append(J_xy)
+            G_rows.append(-J_xy)
+            h_rows.append(np.full(2, self.velocity_bound))
+            h_rows.append(np.full(2, self.velocity_bound))
+
+        if not G_rows:
+            return mink.limits.Constraint()   # inactive (G=None, h=None)
+
+        return mink.limits.Constraint(
+            G=np.vstack(G_rows),
+            h=np.concatenate(h_rows),
+        )
+
+
 def find_geoms(model, names):
     gids = []
     for n in names:
@@ -142,16 +234,26 @@ def find_geoms(model, names):
 class GeneralMotionRetargeting:
     """General Motion Retargeting (GMR).
     """
+    @staticmethod
+    def get_human_fps(tgt_robot: str, default: int = 30) -> int:
+        """Read human_fps from the robot's collision_cfg.yaml without full initialization."""
+        cfg_path = f"assets/{tgt_robot}/collision_cfg.yaml"
+        with open(cfg_path, 'r') as f:
+            cfg = yaml.safe_load(f)
+        return cfg.get('foot_contact', {}).get('human_fps', default)
+
     def __init__(
         self,
         src_human: str,
         tgt_robot: str,
         actual_human_height: float = None,
+        human_fps: int = None,
         solver: str="daqp", # change from "quadprog" to "daqp".
         damping: float=0.05,
         verbose: bool=True,
         use_velocity_limit: bool=True,
     ) -> None:
+        self._human_fps_override = human_fps
         self._warmup_done = False
         self._warmup_iters = 100
 
@@ -296,7 +398,66 @@ class GeneralMotionRetargeting:
             )
             self.all_collision_limits.append(limit_obj)            
 
+        # Store foot contact config for setup after ik_match_tables are loaded
+        self._fc_cfg = cfg.get('foot_contact', {})
+
         self.setup_retarget_configuration()
+
+        # Set up foot contact limit after ik_match_tables are available (human body names derived from them)
+        self.foot_contact_limit = None
+        fc_cfg = self._fc_cfg
+        if fc_cfg.get('enabled', False):
+            fc_threshold      = fc_cfg.get('threshold', 0.01)
+            fc_velocity_bound = fc_cfg.get('velocity_bound', 0.0)
+            fc_human_fps      = self._human_fps_override if self._human_fps_override is not None else fc_cfg.get('human_fps', 30)
+            fc_human_dt       = 1.0 / fc_human_fps
+            fc_points_cfg     = fc_cfg.get('contact_points', [])
+
+            # Build reverse mapping: robot_body_name -> human_body_name from IK tables
+            robot_to_human = {}
+            for robot_body, entry in self.ik_match_table1.items():
+                robot_to_human[robot_body] = entry[0]
+            for robot_body, entry in self.ik_match_table2.items():
+                if robot_body not in robot_to_human:
+                    robot_to_human[robot_body] = entry[0]
+
+            contact_points = []
+            human_body_names = []
+            for cp in fc_points_cfg:
+                body_name = cp['body_name']
+                human_body_name = robot_to_human.get(body_name, '')
+                if not human_body_name:
+                    print(f"[GMR][FootContact] WARNING: '{body_name}' not in IK match tables, skipping.")
+                    continue
+                local_pos = np.array(cp.get('local_pos', [0.0, 0.0, 0.0]), dtype=float)
+                body_id = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, body_name)
+                if body_id == -1:
+                    print(f"[GMR][FootContact] WARNING: robot body '{body_name}' not found in model, skipping.")
+                    continue
+                contact_points.append((body_id, local_pos))
+                human_body_names.append(human_body_name)
+
+            if contact_points:
+                self.foot_contact_limit = FootContactLimit(
+                    model=self.model,
+                    contact_points=contact_points,
+                    human_body_names=human_body_names,
+                    human_dt=fc_human_dt,
+                    threshold=fc_threshold,
+                    velocity_bound=fc_velocity_bound,
+                )
+                self.ik_limits.append(self.foot_contact_limit)
+                if verbose:
+                    # contact_points contains resolved (body_id, local_pos); use human_body_names for display
+                    robot_names = [mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_BODY, bid) for bid, _ in contact_points]
+                    pairs = list(zip(robot_names, human_body_names))
+                    print(f"[GMR] FootContactLimit enabled | {pairs} | "
+                          f"threshold: {fc_threshold} m/s | human_fps: {fc_human_fps} Hz | "
+                          f"threshold_pos: {fc_threshold * fc_human_dt * 1000:.3f} mm/frame | "
+                          f"velocity_bound: {fc_velocity_bound} m/s")
+            else:
+                print("[GMR][FootContact] WARNING: no valid contact points found, limit disabled.")
+
         self.ground_offset = -0.01
         self.floor_gid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "floor")
         left_candidates  = ["Left_Foot", "Left_Inner_Foot", "Left_Outer_Foot", "left_ankle_roll_link",
@@ -495,6 +656,9 @@ class GeneralMotionRetargeting:
                 self.configuration.integrate_inplace(vel, dt)
             self._warmup_done = True
 
+        # Update foot contact mask once per frame from human motion position differences
+        if self.foot_contact_limit is not None:
+            self.foot_contact_limit.update_from_human_motion(self.scaled_human_data)
 
         if self.use_ik_match_table1 and len(self.tasks1_solver) > 0:
             num_iter = 0
@@ -505,7 +669,7 @@ class GeneralMotionRetargeting:
                 self.collision_barrier_task.update(self.configuration)
                 vel1 = mink.solve_ik(
                     self.configuration,
-                    self.tasks1_solver, 
+                    self.tasks1_solver,
                     dt,
                     self.solver,
                     damping=self.damping,
@@ -513,30 +677,28 @@ class GeneralMotionRetargeting:
                 )
                 self.configuration.integrate_inplace(vel1, dt)
                 next_error = self.error1()
-                
+
                 if abs(curr_error - next_error) < 1e-8:
                     break
                 curr_error = next_error
                 num_iter += 1
-            
+
             self.log_collision_warning("Table1", num_iter)
 
         if self.use_ik_match_table2 and len(self.tasks2_solver) > 0:
             num_iter = 0
             curr_error = self.error2()
 
-
             while num_iter < self.max_iter:
                 self.collision_barrier_task.update(self.configuration)
                 vel2 = mink.solve_ik(
                     self.configuration,
-                    self.tasks2_solver, 
+                    self.tasks2_solver,
                     dt,
                     self.solver,
                     damping=self.damping,
                     limits=self.ik_limits,
                 )
-
                 self.configuration.integrate_inplace(vel2, dt)
                 next_error = self.error2()
                 if abs(curr_error - next_error) < 1e-8:
@@ -552,6 +714,22 @@ class GeneralMotionRetargeting:
 
         return self.configuration.data.qpos.copy()
 
+    def get_contact_point_positions(self) -> list:
+        """Return [(world_pos, is_active), ...] for each foot contact point.
+        is_active=True  → constraint was enforced in the last IK solve (foot in contact).
+        is_active=False → foot moving freely.
+        Returns empty list if foot contact is disabled.
+        """
+        if self.foot_contact_limit is None:
+            return []
+        data = self.configuration.data
+        result = []
+        for i, (body_id, local_pos) in enumerate(self.foot_contact_limit.contact_points):
+            body_xpos = data.xpos[body_id]
+            body_xmat = data.xmat[body_id].reshape(3, 3)
+            pos = body_xpos + body_xmat @ local_pos
+            result.append((pos, self.foot_contact_limit._active_mask[i]))
+        return result
 
     def error1(self):
         errs = []

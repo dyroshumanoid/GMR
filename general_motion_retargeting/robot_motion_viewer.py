@@ -10,6 +10,19 @@ import numpy as np
 from rich import print
 
 
+def draw_sphere(v, pos, radius=0.03, rgba=(1.0, 0.2, 0.2, 0.8)):
+    geom = v.user_scn.geoms[v.user_scn.ngeom]
+    mj.mjv_initGeom(
+        geom,
+        type=mj.mjtGeom.mjGEOM_SPHERE,
+        size=[radius, 0, 0],
+        pos=np.asarray(pos, dtype=np.float64),
+        mat=np.eye(3).flatten(),
+        rgba=np.asarray(rgba, dtype=np.float32),
+    )
+    v.user_scn.ngeom += 1
+
+
 def draw_frame(
     pos,
     mat,
@@ -95,18 +108,20 @@ class RobotMotionViewer:
             # Initialize renderer for video recording
             self.renderer = mj.Renderer(self.model, height=video_height, width=video_width)
         
-    def step(self, 
+    def step(self,
             # robot data
-            root_pos, root_rot, dof_pos, 
+            root_pos, root_rot, dof_pos,
             # human data
-            human_motion_data=None, 
+            human_motion_data=None,
             show_human_body_name=False,
             # scale for human point visualization
             human_point_scale=0.1,
-            # human pos offset add for visualization    
+            # human pos offset add for visualization
             human_pos_offset=np.array([0.0, 0.0, 0]),
+            # foot contact point positions to visualize (list of np.ndarray (3,))
+            contact_points=None,
             # rate limit
-            rate_limit=True, 
+            rate_limit=True,
             follow_camera=True,
             ):
         """
@@ -131,19 +146,26 @@ class RobotMotionViewer:
             self.viewer.cam.elevation = -10  # 正面视角，轻微向下看
             # self.viewer.cam.azimuth = 180    # 正面朝向机器人
         
-        if human_motion_data is not None:
+        if human_motion_data is not None or contact_points:
             # Clean custom geometry
             self.viewer.user_scn.ngeom = 0
-            # Draw the task targets for reference
-            for human_body_name, (pos, rot) in human_motion_data.items():
-                draw_frame(
-                    pos,
-                    R.from_quat(rot, scalar_first=True).as_matrix(),
-                    self.viewer,
-                    human_point_scale,
-                    pos_offset=human_pos_offset,
-                    joint_name=human_body_name if show_human_body_name else None
+
+            if human_motion_data is not None:
+                # Draw the task targets for reference
+                for human_body_name, (pos, rot) in human_motion_data.items():
+                    draw_frame(
+                        pos,
+                        R.from_quat(rot, scalar_first=True).as_matrix(),
+                        self.viewer,
+                        human_point_scale,
+                        pos_offset=human_pos_offset,
+                        joint_name=human_body_name if show_human_body_name else None
                     )
+
+            if contact_points:
+                for pos, is_active in contact_points:
+                    rgba = (0.1, 0.9, 0.1, 0.9) if is_active else (0.6, 0.6, 0.6, 0.6)
+                    draw_sphere(self.viewer, pos, radius=0.03, rgba=rgba)
 
         self.viewer.sync()
         if rate_limit is True:

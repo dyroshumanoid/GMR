@@ -75,16 +75,17 @@ if __name__ == "__main__":
         args.smplx_file, SMPLX_FOLDER
     )
     
-    # align fps
-    tgt_fps = 30
+    # align fps — read target fps from robot config YAML so it stays in sync
+    tgt_fps = GMR.get_human_fps(args.robot)
     smplx_data_frames, aligned_fps = get_smplx_data_offline_fast(smplx_data, body_model, smplx_output, tgt_fps=tgt_fps)
-    
-   
+
+
     # Initialize the retargeting system
     retarget = GMR(
         actual_human_height=actual_human_height,
         src_human="smplx",
         tgt_robot=args.robot,
+        human_fps=aligned_fps,
     )
     
     robot_motion_viewer = RobotMotionViewer(robot_type=args.robot,
@@ -140,6 +141,7 @@ if __name__ == "__main__":
             human_motion_data=retarget.scaled_human_data,
             # human_motion_data=smplx_data,
             human_pos_offset=np.array([0.0, 0.0, 0.0]),
+            contact_points=retarget.get_contact_point_positions(),
             show_human_body_name=False,
             rate_limit=args.rate_limit,
             follow_camera=False,
