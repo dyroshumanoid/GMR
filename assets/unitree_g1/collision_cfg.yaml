@@ -3,25 +3,21 @@ parameters:
   damping: 0.5
   max_iter: 10
   velocity_limit : 9
-  collision_avoidance_weight : 0.15
+  collision_avoidance_weight : 0.03
 
 
 groups:
   head: ["Head"]
-  torso: ["Left_Pelvis", "Right_Pelvis", "Waist", "Upper_Left_Chest", "Upper_Right_Chest"]
+  torso: ["Pelvis", "Waist", "Chest"]
+  torso_upper: ["Waist", "Chest"]
   
-  l_foot: ["Left_Foot"]
-  r_foot: ["Right_Foot"]
+  l_leg_upper: ["Left_Upper_Leg1"]
+  r_leg_upper: ["Right_Upper_Leg1"]
 
-  l_hand_arm: ["Left_Elbow", "Left_Forearm", "Left_Hand1", "Left_Hand2", "Left_Hand3"]
-  r_hand_arm: ["Right_Elbow", "Right_Forearm", "Right_Hand1", "Right_Hand2", "Right_Hand3"]
-  l_lower_leg_foot: ["Left_Lower_Leg", "Left_Lower_Leg2", "Left_Foot"]
-  r_lower_leg_foot: ["Right_Lower_Leg", "Right_Lower_Leg2", "Right_Foot"]
-
-  l_upper_leg_foot: ["Left_Upper_Leg1", "Left_Upper_Leg2","Left_Lower_Leg", "Left_Lower_Leg2"]
-  r_upper_leg_foot: ["Right_Upper_Leg1", "Right_Upper_Leg2", "Right_Lower_Leg", "Right_Lower_Leg2"]
-  l_arm: ["Left_Upper_Arm", "Left_Forearm", "Left_Elbow", "Left_Hand1", "Left_Hand2", "Left_Hand3"]
-  r_arm: ["Right_Upper_Arm", "Right_Forearm", "Right_Elbow", "Right_Hand1", "Right_Hand2", "Right_Hand3"]
+  l_leg_lower: ["Left_Upper_Leg2","Left_Lower_Leg", "Left_Lower_Leg2", "Left_Foot"]
+  r_leg_lower: ["Right_Upper_Leg2", "Right_Lower_Leg", "Right_Lower_Leg2", "Right_Foot"]
+  l_arm: ["Left_Upper_Arm", "Left_Forearm", "Left_Elbow", "Left_Hand1"]
+  r_arm: ["Right_Upper_Arm", "Right_Forearm", "Right_Elbow", "Right_Hand1"]
   l_leg: ["Left_Upper_Leg1", "Left_Upper_Leg2", "Left_Lower_Leg", "Left_Lower_Leg2", "Left_Foot"]
   r_leg: ["Right_Upper_Leg1", "Right_Upper_Leg2", "Right_Lower_Leg", "Right_Lower_Leg2", "Right_Foot"]
   ground: ["floor"]
@@ -31,17 +27,19 @@ collision_limits:
   - name: "body_general"
     pairs: 
       - ["l_leg", "r_leg"]
-      - ["l_arm", "l_leg"]
+      - ["l_arm", "l_leg"] 
       - ["l_arm", "r_leg"]
       - ["r_arm", "l_leg"]
       - ["r_arm", "r_leg"]
       - ["r_arm", "l_arm"]
-      - ["l_hand_arm", "torso"]
-      - ["r_hand_arm", "torso"]
+      - ["l_arm", "torso"]
+      - ["r_arm", "torso"]
       - ["head", "l_arm"]
       - ["head", "r_arm"]
-      - ["l_lower_leg_foot", "torso"]
-      - ["r_lower_leg_foot", "torso"]
+      - ["l_leg_lower", "torso"]
+      - ["r_leg_lower", "torso"]
+      - ["r_leg_upper", "torso_upper"]
+      - ["l_leg_upper", "torso_upper"]
 
     margin: 0.01
     detect_dist: 0.3

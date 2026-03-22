@@ -48,6 +48,7 @@ class RobotMotionViewer:
                 camera_follow=True,
                 motion_fps=30,
                 transparent_robot=0,
+                
                 # video recording
                 record_video=False,
                 video_path=None,
@@ -78,6 +79,8 @@ class RobotMotionViewer:
             )      
 
         self.viewer.opt.flags[mj.mjtVisFlag.mjVIS_TRANSPARENT] = transparent_robot
+        self.viewer.opt.geomgroup[2] = 0
+
         
         if self.record_video:
             assert video_path is not None, "Please provide video path for recording"
@@ -148,7 +151,7 @@ class RobotMotionViewer:
 
         if self.record_video:
             # Use renderer for proper offscreen rendering
-            self.renderer.update_scene(self.data, camera=self.viewer.cam)
+            self.renderer.update_scene(self.data, camera=self.viewer.cam, scene_option=self.viewer.opt)
             img = self.renderer.render()
             self.mp4_writer.append_data(img)
 

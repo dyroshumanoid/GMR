@@ -104,10 +104,9 @@ class CollisionBarrierTask(mink.Task):
                         distmax=detect_dist,
                     )
                 ).reshape(1, -1)
-                
+
                 dBdh = self._relaxed_barrier_gradient(h)
                 J_bar = dBdh * J_h
-
                 e_bar = 0.0
                 J_rows.append(J_bar)
                 e_rows.append(np.array([e_bar]))
@@ -300,8 +299,14 @@ class GeneralMotionRetargeting:
         self.setup_retarget_configuration()
         self.ground_offset = -0.01
         self.floor_gid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "floor")
-        left_candidates  = ["Left_Foot", "Left_Inner_Foot", "Left_Outer_Foot"]
-        right_candidates = ["Right_Foot", "Right_Inner_Foot", "Right_Outer_Foot"]
+        left_candidates  = ["Left_Foot", "Left_Inner_Foot", "Left_Outer_Foot", "left_ankle_roll_link",
+                             "left_foot1_collision", "left_foot2_collision", "left_foot3_collision",
+                             "left_foot4_collision", "left_foot5_collision", "left_foot6_collision",
+                             "left_foot7_collision"]
+        right_candidates = ["Right_Foot", "Right_Inner_Foot", "Right_Outer_Foot", "right_ankle_roll_link",
+                             "right_foot1_collision", "right_foot2_collision", "right_foot3_collision",
+                             "right_foot4_collision", "right_foot5_collision", "right_foot6_collision",
+                             "right_foot7_collision"]
 
         self.left_foot_gids  = find_geoms(self.model, left_candidates)
         self.right_foot_gids = find_geoms(self.model, right_candidates)
@@ -544,7 +549,7 @@ class GeneralMotionRetargeting:
 
         mj.mj_fwdPosition(self.model, self.configuration.data)
         mj.mj_forward(self.model, self.configuration.data)
-        
+
         return self.configuration.data.qpos.copy()
 
 
