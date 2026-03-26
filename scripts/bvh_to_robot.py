@@ -91,7 +91,6 @@ if __name__ == "__main__":
         src_human=f"bvh_{args.format}",
         tgt_robot=args.robot,
         actual_human_height=actual_human_height,
-        human_fps=motion_fps,
     )
     
     robot_motion_viewer = RobotMotionViewer(robot_type=args.robot,

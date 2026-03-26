@@ -3,7 +3,7 @@ parameters:
   damping: 0.5
   max_iter: 10
   velocity_limit : 9
-  collision_avoidance_weight : 0.03
+  collision_avoidance_weight : 0.02
 
 
 groups:
@@ -66,11 +66,9 @@ collision_limits:
 # human_body_name is derived automatically from the IK config (format-agnostic).
 # ──────────────────────────────────────────────────────────────────────────────
 foot_contact:
-  enabled: true
-  # human_fps: 30     # Hz — frame rate of the human motion input (used to compute frame dt)
-  human_fps: 1     # Hz — frame rate of the human motion input (used to compute frame dt)
-  threshold: 0.01   # m/s (1 cm/s) — contact activates when human foot speed <= this
-  velocity_bound: 0.0 # m/s  — hard XY velocity limit once in contact
+  enabled: false
+  threshold: 0.3   # m/s (1 cm/s) — contact activates when human foot speed <= this
+  velocity_bound: 0.001 # m/s  — hard XY velocity limit once in contact
 
   contact_points:
     - body_name: "left_ankle_roll_link"

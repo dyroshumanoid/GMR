@@ -149,7 +149,6 @@ class FootContactLimit(mink.Limit):
         model: mj.MjModel,
         contact_points: list,       # list of (body_id, local_pos_np)
         human_body_names: list,     # list of human body names, one per contact point
-        human_dt: float = 1.0/30,  # seconds between human motion frames (1/fps)
         threshold: float = 0.01,    # m/s — contact activates when human foot speed <= threshold
         velocity_bound: float = 0.0,
         name: str = "foot_contact",
@@ -157,7 +156,6 @@ class FootContactLimit(mink.Limit):
         self.model = model
         self.contact_points = contact_points
         self.human_body_names = human_body_names
-        self.human_dt = human_dt
         self.threshold = threshold
         self.velocity_bound = velocity_bound  # max contact-point XY velocity [m/s]
         self.name = name
@@ -169,7 +167,7 @@ class FootContactLimit(mink.Limit):
 
         human_data: dict of {human_body_name: (pos, rot)} for the current frame
         """
-        threshold_pos = self.threshold * self.human_dt  # convert m/s threshold to meters per frame
+        threshold_pos = self.threshold / 30  # convert m/s threshold to meters per frame (fixed 30 fps)
         for i, human_name in enumerate(self.human_body_names):
             if human_name not in human_data:
                 self._active_mask[i] = False
@@ -234,26 +232,16 @@ def find_geoms(model, names):
 class GeneralMotionRetargeting:
     """General Motion Retargeting (GMR).
     """
-    @staticmethod
-    def get_human_fps(tgt_robot: str, default: int = 30) -> int:
-        """Read human_fps from the robot's collision_cfg.yaml without full initialization."""
-        cfg_path = f"assets/{tgt_robot}/collision_cfg.yaml"
-        with open(cfg_path, 'r') as f:
-            cfg = yaml.safe_load(f)
-        return cfg.get('foot_contact', {}).get('human_fps', default)
-
     def __init__(
         self,
         src_human: str,
         tgt_robot: str,
         actual_human_height: float = None,
-        human_fps: int = None,
         solver: str="daqp", # change from "quadprog" to "daqp".
         damping: float=0.05,
         verbose: bool=True,
         use_velocity_limit: bool=True,
     ) -> None:
-        self._human_fps_override = human_fps
         self._warmup_done = False
         self._warmup_iters = 100
 
@@ -409,8 +397,6 @@ class GeneralMotionRetargeting:
         if fc_cfg.get('enabled', False):
             fc_threshold      = fc_cfg.get('threshold', 0.01)
             fc_velocity_bound = fc_cfg.get('velocity_bound', 0.0)
-            fc_human_fps      = self._human_fps_override if self._human_fps_override is not None else fc_cfg.get('human_fps', 30)
-            fc_human_dt       = 1.0 / fc_human_fps
             fc_points_cfg     = fc_cfg.get('contact_points', [])
 
             # Build reverse mapping: robot_body_name -> human_body_name from IK tables
@@ -442,7 +428,6 @@ class GeneralMotionRetargeting:
                     model=self.model,
                     contact_points=contact_points,
                     human_body_names=human_body_names,
-                    human_dt=fc_human_dt,
                     threshold=fc_threshold,
                     velocity_bound=fc_velocity_bound,
                 )
@@ -452,8 +437,8 @@ class GeneralMotionRetargeting:
                     robot_names = [mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_BODY, bid) for bid, _ in contact_points]
                     pairs = list(zip(robot_names, human_body_names))
                     print(f"[GMR] FootContactLimit enabled | {pairs} | "
-                          f"threshold: {fc_threshold} m/s | human_fps: {fc_human_fps} Hz | "
-                          f"threshold_pos: {fc_threshold * fc_human_dt * 1000:.3f} mm/frame | "
+                          f"threshold: {fc_threshold} m/s | human_fps: 30 Hz | "
+                          f"threshold_pos: {fc_threshold / 30 * 1000:.3f} mm/frame | "
                           f"velocity_bound: {fc_velocity_bound} m/s")
             else:
                 print("[GMR][FootContact] WARNING: no valid contact points found, limit disabled.")

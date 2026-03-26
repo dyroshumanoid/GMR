@@ -92,8 +92,8 @@
           <inertial pos="0.029812 -0.001045 -0.087934" quat="0.977808 -1.97119e-05 0.205576 -0.0403793" mass="1.52" diaginertia="0.00254986 0.00241169 0.00148755"/>
           <joint name="left_hip_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.5236 1.57" actuatorfrcrange="-139 139"/>
           <!-- ADDED: collision -->
-          <geom class="cls_lleg" name="Left_Upper_Leg1" size="0.065 0.05" pos="0.02 0.003 -0.06" quat="0.999848 0 -0.017452 0" rgba="0 0 1 0.3" type="capsule" />
-          <geom class="cls_lleg" name="Left_Upper_Leg2" size="0.053 0.06" pos="0.017 -0.003 -0.18" quat="0.991445 0 0.130526 0" rgba="0 0 1 0.3" type="capsule" />
+          <geom class="cls_lleg" name="Left_Upper_Leg1" size="0.065 0.05" pos="0.023 0.003 -0.05" quat="0.999848 0 -0.017452 0" rgba="0 0 1 0.3" type="capsule" />
+          <geom class="cls_lleg" name="Left_Upper_Leg2" size="0.053 0.065" pos="0.017 -0.003 -0.19" quat="0.991445 0 0.130526 0" rgba="0 0 1 0.3" type="capsule" />
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.7 0.7 0.7 1" mesh="left_hip_roll_link"/>
           <geom type="mesh" rgba="0.7 0.7 0.7 1" mesh="left_hip_roll_link"/>
           <body name="left_hip_yaw_link" pos="0.025001 0 -0.12412">
@@ -143,8 +143,8 @@
           <joint name="right_hip_roll_joint" pos="0 0 0" axis="1 0 0" range="-1.57 0.5236" actuatorfrcrange="-139 139"/>
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.7 0.7 0.7 1" mesh="right_hip_roll_link"/>
           <!-- ADDED: collision -->
-          <geom class="cls_rleg" name="Right_Upper_Leg1" size="0.065 0.05" pos="0.02 -0.003 -0.06" quat="0.999848 0 -0.017452 0" rgba="0 0 1 0.3" type="capsule" />
-          <geom class="cls_rleg" name="Right_Upper_Leg2" size="0.053 0.06" pos="0.017 0.003 -0.18" quat="0.991445 0 0.130526 0" rgba="0 0 1 0.3" type="capsule" />
+          <geom class="cls_rleg" name="Right_Upper_Leg1" size="0.065 0.05" pos="0.023 -0.003 -0.05" quat="0.999848 0 -0.017452 0" rgba="0 0 1 0.3" type="capsule" />
+          <geom class="cls_rleg" name="Right_Upper_Leg2" size="0.053 0.065" pos="0.017 0.003 -0.19" quat="0.991445 0 0.130526 0" rgba="0 0 1 0.3" type="capsule" />
           <geom type="mesh" rgba="0.7 0.7 0.7 1" mesh="right_hip_roll_link"/>
           <body name="right_hip_yaw_link" pos="0.025001 0 -0.12412">
             <inertial pos="-0.057709 0.010981 -0.15078" quat="0.751181 0.223482 0.15832 0.600598" mass="1.702" diaginertia="0.00776166 0.00717575 0.00160139"/>
@@ -247,7 +247,7 @@
                         <inertial pos="0.0229999 -0.00111685 -0.00111658" quat="0.249998 0.661363 0.293036 0.643608" mass="0.48405" diaginertia="0.000430353 0.000429873 0.000164648"/>
                         <joint name="left_wrist_pitch_joint" pos="0 0 0" axis="0 1 0" range="-1.61443 1.61443" actuatorfrcrange="-5 5"/>
                         <!-- ADDED: collision -->
-                        <geom class="cls_larm" name="Left_Forearm" size ="0.034 0.037" quat="0.707107 0 0.707107 0" pos="0.01 0.0 -0.0" rgba="0 0 1 0.3" type="capsule" />
+                        <geom class="cls_larm" name="Left_Forearm" size ="0.034 0.052" quat="0.707107 0 0.707107 0" pos="0.025 0.0 -0.0" rgba="0 0 1 0.3" type="capsule" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.7 0.7 0.7 1" mesh="left_wrist_pitch_link"/>
                         <geom type="mesh" rgba="0.7 0.7 0.7 1" mesh="left_wrist_pitch_link"/>
                         <body name="left_wrist_yaw_link" pos="0.046 0 0">
@@ -258,7 +258,7 @@
                           <body name="left_rubber_hand" pos="0.0415 0.003 0" quat="1 0 0 0">
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.7 0.7 0.7 1" mesh="left_rubber_hand"/>
                             <!-- ADDED: collision -->
-                            <geom class="cls_larm" name="Left_Hand1" size="0.06" pos="0.07 -0.003 0.012" quat="0.843391 0 0.537299 0" rgba="0 0 1 0.3" type="sphere"/>
+                            <geom class="cls_larm" name="Left_Hand1" size="0.07" pos="0.07 -0.003 0.012" quat="0.843391 0 0.537299 0" rgba="0 0 1 0.3" type="sphere"/>
                           </body>
                         </body>
                       </body>
@@ -301,7 +301,7 @@
                         <joint name="right_wrist_pitch_joint" pos="0 0 0" axis="0 1 0" range="-1.61443 1.61443" actuatorfrcrange="-5 5"/>
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.7 0.7 0.7 1" mesh="right_wrist_pitch_link"/>
                         <!-- ADDED: collision -->
-                        <geom class="cls_rarm" name="Right_Forearm" size ="0.034 0.037" quat="0.707107 0 0.707107 0" pos="0.01 0.0 -0.0" rgba="0 0 1 0.3" type="capsule" />
+                        <geom class="cls_rarm" name="Right_Forearm" size ="0.034 0.052" quat="0.707107 0 0.707107 0" pos="0.025 0.0 -0.0" rgba="0 0 1 0.3" type="capsule" />
                         <geom type="mesh" rgba="0.7 0.7 0.7 1" mesh="right_wrist_pitch_link"/>
                         <body name="right_wrist_yaw_link" pos="0.046 0 0">
                           <inertial pos="0.0708244 -0.000191745 0.00161742" quat="0.493188 0.468078 0.526295 0.510571" mass="0.254576" diaginertia="0.000646113 0.000559993 0.000147566"/>
@@ -311,7 +311,7 @@
                           <body name="right_rubber_hand" pos="0.0415 -0.003 0" quat="1 0 0 0">
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.7 0.7 0.7 1" mesh="right_rubber_hand"/>
                             <!-- ADDED: collision -->
-                            <geom class="cls_rarm" name="Right_Hand1" size="0.06" pos="0.07 0.003 0.012" quat="0.843391 0 0.537299 0" rgba="0 0 1 0.3" type="sphere"/>
+                            <geom class="cls_rarm" name="Right_Hand1" size="0.07" pos="0.07 0.003 0.012" quat="0.843391 0 0.537299 0" rgba="0 0 1 0.3" type="sphere"/>
                           </body>
                         </body>
                       </body>
