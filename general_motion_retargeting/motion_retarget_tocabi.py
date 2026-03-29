@@ -50,7 +50,7 @@ class CollisionBarrierTask(mink.Task):
         self.collision_limits = collision_limits
         self.w_bar = float(w_bar)
         self.name = name
-        self.h_eps = 1.5e-3  # small epsilon to prevent singularity when h is close to zero
+        self.h_eps = 1e-3  # small epsilon to prevent singularity when h is close to zero
         self._J = np.zeros((0, model.nv))
         self._e = np.zeros((0,))
         self._w = np.zeros((0,))
@@ -338,6 +338,9 @@ class GeneralMotionRetargeting:
         
         # Global weight for the SOFT collision barrier task
         self.collision_weight = params.get('collision_avoidance_weight', 1.0)
+        # Number of frames over which to ramp up collision weight from 0 to collision_weight
+        self._collision_ramp_frames = params.get('collision_ramp_frames', 30)
+        self._frame_count = 0
 
 
 
@@ -628,6 +631,8 @@ class GeneralMotionRetargeting:
         dt = self.configuration.model.opt.timestep
 
         if not self._warmup_done:
+            # Disable collision during warmup so the robot settles to the target pose cleanly
+            self.collision_barrier_task.w_bar = 0.0
             for _ in range(self._warmup_iters):
                 self.collision_barrier_task.update(self.configuration)
                 vel = mink.solve_ik(
@@ -640,6 +645,14 @@ class GeneralMotionRetargeting:
                 )
                 self.configuration.integrate_inplace(vel, dt)
             self._warmup_done = True
+
+        # Ramp up collision weight gradually over the first _collision_ramp_frames frames
+        if self._collision_ramp_frames > 0:
+            ramp = min(1.0, self._frame_count / self._collision_ramp_frames)
+        else:
+            ramp = 1.0
+        self.collision_barrier_task.w_bar = ramp * self.collision_weight
+        self._frame_count += 1
 
         # Update foot contact mask once per frame from human motion position differences
         if self.foot_contact_limit is not None:

@@ -2,8 +2,9 @@
 parameters:
   damping: 0.5
   max_iter: 10
-  velocity_limit : 20
-  collision_avoidance_weight : 0.0
+  velocity_limit : 10
+  collision_avoidance_weight : 0.4
+  collision_ramp_frames: 60
 
 groups:
   head: ["Head"]
@@ -27,23 +28,10 @@ groups:
 
 
 collision_limits:
-  - name: "thigh"
-    pairs: [["Right_Upper_Leg","Left_Upper_Leg"]]
-    margin: 0.001
-    detect_dist: 0.03
-
-  - name: "feet"
-    pairs: [["l_foot", "r_foot"]]
-    margin: 0.001
-    detect_dist: 0.05
-
-  - name: "shin"
-    pairs: [["Left_Lower_Leg", "Right_Lower_Leg"]]
-    margin: 0.001
-    detect_dist: 0.05
 
   - name: "body_general"
     pairs: 
+      - ["l_foot", "r_foot"]
       - ["l_arm", "r_arm"]
       - ["l_arm", "l_leg"]
       - ["l_arm", "r_leg"]
@@ -55,19 +43,25 @@ collision_limits:
       - ["r_hand_arm", "torso"]
       - ["l_lower_leg_foot", "torso"]
       - ["r_lower_leg_foot", "torso"]
-    margin: 0.001
-    detect_dist: 0.03
+    margin: 0.01
+    detect_dist: 0.05
   
   - name: "ground_collision"
-    pairs: 
-      - ["l_upper_leg_foot", "ground"]
+    pairs:
       - ["l_arm", "ground"]
       - ["r_arm", "ground"]
-      # - ["r_leg", "ground"]
-      # - ["l_leg", "ground"]
-
       - ["head", "ground"]
-      - ["r_upper_leg_foot", "ground"]
-      - ["torso", "ground"]
-    margin: 0.0001
-    detect_dist: 0.01
+    margin: 0.01
+    detect_dist: 0.05
+
+foot_contact:
+  enabled: true
+  threshold: 0.3   # m/s (1 cm/s) — contact activates when human foot speed <= this
+  velocity_bound: 0.001 # m/s  — hard XY velocity limit once in contact
+
+  contact_points:
+    - body_name: "left_ankle_roll_link"
+      local_pos: [0.03, 0.0, -0.193]
+
+    - body_name: "right_ankle_roll_link"
+      local_pos: [0.03, 0.0, -0.193]

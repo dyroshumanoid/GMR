@@ -3,20 +3,25 @@ parameters:
   damping: 0.5
   max_iter: 10
   velocity_limit : 9
-  collision_avoidance_weight : 0.02
+  collision_avoidance_weight : 0.3
 
 
 groups:
-  head: ["Head"]
-  torso: ["Pelvis", "Waist", "Chest"]
-  torso_upper: ["Waist", "Chest"]
+  torso: ["Pelvis", "Waist", "Chest", "Head"]
+  torso_upper: ["Waist", "Chest", "Head"]
   
+  l_arm_upper: ["Left_Upper_Arm"]
+  r_arm_upper: ["Right_Upper_Arm"]
+  l_arm_lower: ["Left_Forearm", "Left_Elbow","Left_Hand1"]
+  r_arm_lower: ["Right_Forearm", "Right_Elbow", "Right_Hand1"]
+  
+
   l_leg_upper: ["Left_Upper_Leg1"]
   r_leg_upper: ["Right_Upper_Leg1"]
-
   l_leg_lower: ["Left_Upper_Leg2","Left_Lower_Leg", "Left_Lower_Leg2", "Left_Foot"]
   r_leg_lower: ["Right_Upper_Leg2", "Right_Lower_Leg", "Right_Lower_Leg2", "Right_Foot"]
-  l_arm: ["Left_Upper_Arm", "Left_Forearm", "Left_Elbow", "Left_Hand1"]
+
+  l_arm: ["Left_Upper_Arm", "Left_Forearm", "Left_Elbow","Left_Hand1"]
   r_arm: ["Right_Upper_Arm", "Right_Forearm", "Right_Elbow", "Right_Hand1"]
   l_leg: ["Left_Upper_Leg1", "Left_Upper_Leg2", "Left_Lower_Leg", "Left_Lower_Leg2", "Left_Foot"]
   r_leg: ["Right_Upper_Leg1", "Right_Upper_Leg2", "Right_Lower_Leg", "Right_Lower_Leg2", "Right_Foot"]
@@ -34,15 +39,13 @@ collision_limits:
       - ["r_arm", "l_arm"]
       - ["l_arm", "torso"]
       - ["r_arm", "torso"]
-      - ["head", "l_arm"]
-      - ["head", "r_arm"]
       - ["l_leg_lower", "torso"]
       - ["r_leg_lower", "torso"]
       - ["r_leg_upper", "torso_upper"]
       - ["l_leg_upper", "torso_upper"]
 
     margin: 0.01
-    detect_dist: 0.3
+    detect_dist: 0.05
 
   
   - name: "ground_collision"
@@ -51,10 +54,9 @@ collision_limits:
       - ["r_arm", "ground"]
       - ["r_leg", "ground"]
       - ["l_leg", "ground"]
-      - ["head", "ground"]
       - ["torso", "ground"]
     margin: 0.01
-    detect_dist: 0.3
+    detect_dist: 0.05
 
 
 # ── Foot contact zero-velocity constraint ─────────────────────────────────────
@@ -66,7 +68,7 @@ collision_limits:
 # human_body_name is derived automatically from the IK config (format-agnostic).
 # ──────────────────────────────────────────────────────────────────────────────
 foot_contact:
-  enabled: false
+  enabled: true
   threshold: 0.3   # m/s (1 cm/s) — contact activates when human foot speed <= this
   velocity_bound: 0.001 # m/s  — hard XY velocity limit once in contact
 
