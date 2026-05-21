@@ -55,6 +55,9 @@ class CollisionBarrierTask(mink.Task):
         self._e = np.zeros((0,))
         self._w = np.zeros((0,))
         self._fromto = np.zeros(6, dtype=np.float64)
+        self._normal = np.zeros(3, dtype=np.float64)
+        self._jac1 = np.zeros((3, model.nv), dtype=np.float64)
+        self._jac2 = np.zeros((3, model.nv), dtype=np.float64)
 
 
     def _relaxed_barrier_gradient(self, h: float) -> float:
@@ -95,14 +98,8 @@ class CollisionBarrierTask(mink.Task):
 
                 # Contact normal Jacobian: J_h = ∂h/∂q
                 J_h = mink.limits.collision_avoidance_limit.compute_contact_normal_jacobian(
-                    model, data,
-                    mink.limits.collision_avoidance_limit.Contact(
-                        dist=dist,
-                        fromto=self._fromto.copy(),
-                        geom1=geom_a,
-                        geom2=geom_b,
-                        distmax=detect_dist,
-                    )
+                    model, data, geom_a, geom_b,
+                    self._fromto, self._normal, self._jac1, self._jac2,
                 ).reshape(1, -1)
 
                 dBdh = self._relaxed_barrier_gradient(h)
@@ -555,6 +552,49 @@ class GeneralMotionRetargeting:
         self.tasks2_solver.append(self.collision_barrier_task)
 
 
+    def calibrate_offsets_from_initial_pose(self, human_data_init, verbose=True):
+        """Replace JSON-loaded rotation offsets with values derived from the
+        initial robot pose (qpos0) and the initial human motion frame.
+
+        For each (robot_body, human_body) pair active in the IK match tables:
+            R_off = R_human_init^{-1} @ R_robot_init
+        which guarantees R_target = R_human * R_off equals R_robot at frame 0.
+
+        Must be called before the first retarget(). Robot configuration is
+        not modified.
+        """
+        tmp_data = mj.MjData(self.model)
+        mj.mj_forward(self.model, tmp_data)
+
+        def _calibrate(match_table, rot_offsets_store, tag):
+            for robot_body, entry in match_table.items():
+                human_body, pos_w, rot_w = entry[0], entry[1], entry[2]
+                if pos_w == 0 and rot_w == 0:
+                    continue
+                bid = self.robot_body_names.get(robot_body)
+                if bid is None:
+                    print(f"[CAL][{tag}] robot body '{robot_body}' not in model, keep JSON value.")
+                    continue
+                if human_body not in human_data_init:
+                    print(f"[CAL][{tag}] human body '{human_body}' missing in init frame, keep JSON value.")
+                    continue
+                R_robot = R.from_matrix(tmp_data.xmat[bid].reshape(3, 3).copy())
+                quat = np.asarray(human_data_init[human_body][1])
+                R_human = R.from_quat(quat, scalar_first=True)
+                R_off = R_human.inv() * R_robot
+                rot_offsets_store[human_body] = R_off
+                if verbose:
+                    eh = R_human.as_euler('xyz', degrees=True)
+                    er = R_robot.as_euler('xyz', degrees=True)
+                    eo = R_off.as_euler('xyz', degrees=True)
+                    ej = R.from_quat(np.asarray(entry[4]), scalar_first=True).as_euler('xyz', degrees=True)
+                    def _fmt(e):
+                        return f"[{e[0]:+7.2f}, {e[1]:+7.2f}, {e[2]:+7.2f}]"
+                    print(f"[CAL][{tag}] {robot_body:26s} <- {human_body:14s} | "
+                          f"R_h={_fmt(eh)} R_r={_fmt(er)} off_auto={_fmt(eo)} off_json={_fmt(ej)} (deg, xyz)")
+
+        _calibrate(self.ik_match_table1, self.rot_offsets1, "Table1")
+        _calibrate(self.ik_match_table2, self.rot_offsets2, "Table2")
 
 
 
