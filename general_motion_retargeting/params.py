@@ -58,6 +58,13 @@ IK_CONFIG_DICT = {
         "pal_talos": IK_CONFIG_ROOT / "bvh_to_talos.json",
         "tocabi": IK_CONFIG_ROOT / "bvh_lafan1_to_tocabi.json",
     },
+    # Orientation-only IK used to pose the robot in the same configuration
+    # as a BVH calibration frame (all position weights zeroed). Used by
+    # scripts/vis_calibrate_scale.py to make the LSQ link-length comparison
+    # apples-to-apples instead of comparing the BVH pose to robot rest pose.
+    "bvh_calibration":{
+        "unitree_g1": IK_CONFIG_ROOT / "bvh_calibration_to_g1.json",
+    },
     "bvh_nokov":{
         "unitree_g1": IK_CONFIG_ROOT / "bvh_nokov_to_g1.json",
     },
