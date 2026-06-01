@@ -26,7 +26,7 @@ def list_pkl_files(folder: str):
     return files
 
 
-def run_single_motion(robot_type: str, pkl_path: str, record_video: bool, video_path: str, rate_limit: bool):
+def run_single_motion(robot_type: str, pkl_path: str, record_video: bool, video_path: str, rate_limit: bool, video_width: int = 640, video_height: int = 480):
     # Load one pkl
     (
         motion_data,
@@ -44,6 +44,8 @@ def run_single_motion(robot_type: str, pkl_path: str, record_video: bool, video_
         camera_follow=True,
         record_video=record_video,
         video_path=video_path,
+        video_width=video_width,
+        video_height=video_height,
         keyboard_callback=None,  # batch mode
     )
 
@@ -60,7 +62,7 @@ def run_single_motion(robot_type: str, pkl_path: str, record_video: bool, video_
         env.close()
 
 
-def run_batch_subprocess(robot_type: str, robot_motion_folder: str, video_dir: str, rate_limit: bool):
+def run_batch_subprocess(robot_type: str, robot_motion_folder: str, video_dir: str, rate_limit: bool, video_width: int = 640, video_height: int = 480):
     os.makedirs(video_dir, exist_ok=True)
 
     motion_files = list_pkl_files(robot_motion_folder)
@@ -83,6 +85,8 @@ def run_batch_subprocess(robot_type: str, robot_motion_folder: str, video_dir: s
             "--pkl_path", pkl_path,
             "--record_video",
             "--video_path", out_mp4,
+            "--video_width", str(video_width),
+            "--video_height", str(video_height),
         ]
         if rate_limit:
             cmd.append("--rate_limit")
@@ -96,7 +100,7 @@ def run_batch_subprocess(robot_type: str, robot_motion_folder: str, video_dir: s
     print("Batch recording done.")
 
 
-def interactive_viewer(robot_type: str, robot_motion_folder: str, record_video: bool, video_path: str):
+def interactive_viewer(robot_type: str, robot_motion_folder: str, record_video: bool, video_path: str, video_width: int = 640, video_height: int = 480):
     global motion_num, motion_id, current_motion_id, paused
 
     if not os.path.exists(robot_motion_folder):
@@ -141,6 +145,8 @@ def interactive_viewer(robot_type: str, robot_motion_folder: str, record_video: 
         camera_follow=True,
         record_video=record_video,
         video_path=video_path,
+        video_width=video_width,
+        video_height=video_height,
         keyboard_callback=keyboard_callback
     )
 
@@ -182,6 +188,8 @@ if __name__ == "__main__":
     parser.add_argument("--record_video", action="store_true")
     parser.add_argument("--video_path", type=str, default="videos/example.mp4")
     parser.add_argument("--video_dir", type=str, default="videos")
+    parser.add_argument("--video_width", type=int, default=640)
+    parser.add_argument("--video_height", type=int, default=480)
     parser.add_argument("--rate_limit", action="store_true")
 
     args = parser.parse_args()
@@ -189,14 +197,17 @@ if __name__ == "__main__":
     if args.mode == "interactive":
         if args.robot_motion_folder is None:
             raise ValueError("--robot_motion_folder is required for interactive mode")
-        interactive_viewer(args.robot, args.robot_motion_folder, args.record_video, args.video_path)
+        interactive_viewer(args.robot, args.robot_motion_folder, args.record_video, args.video_path,
+                           video_width=args.video_width, video_height=args.video_height)
 
     elif args.mode == "batch":
         if args.robot_motion_folder is None:
             raise ValueError("--robot_motion_folder is required for batch mode")
-        run_batch_subprocess(args.robot, args.robot_motion_folder, args.video_dir, args.rate_limit)
+        run_batch_subprocess(args.robot, args.robot_motion_folder, args.video_dir, args.rate_limit,
+                             video_width=args.video_width, video_height=args.video_height)
 
     else:  # single
         if args.pkl_path is None:
             raise ValueError("--pkl_path is required for single mode")
-        run_single_motion(args.robot, args.pkl_path, args.record_video, args.video_path, args.rate_limit)
+        run_single_motion(args.robot, args.pkl_path, args.record_video, args.video_path, args.rate_limit,
+                          video_width=args.video_width, video_height=args.video_height)

@@ -67,8 +67,14 @@ collision_limits:
 # threshold is in m/s; velocity_bound is in m/s.
 # human_body_name is derived automatically from the IK config (format-agnostic).
 # ──────────────────────────────────────────────────────────────────────────────
+foot_geoms:
+  left:
+    - Left_Foot
+  right:
+    - Right_Foot
+
 foot_contact:
-  enabled: true
+  enabled: false
   threshold: 0.3   # m/s (1 cm/s) — contact activates when human foot speed <= this
   velocity_bound: 0.001 # m/s  — hard XY velocity limit once in contact
 

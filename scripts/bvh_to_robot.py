@@ -36,7 +36,7 @@ if __name__ == "__main__":
     
     parser.add_argument(
         "--robot",
-        choices=["unitree_g1", "unitree_g1_with_hands", "booster_t1", "stanford_toddy", "fourier_n1", "engineai_pm01", "pal_talos", "tocabi"],
+        choices=["unitree_g1", "unitree_g1_with_hands", "booster_t1", "stanford_toddy", "fourier_n1", "engineai_pm01", "pal_talos", "tocabi", "p73"],
         default="unitree_g1",
     )
     
@@ -70,7 +70,15 @@ if __name__ == "__main__":
         default=30,
         type=int,
     )
-    
+
+    parser.add_argument(
+        "--scale_mode",
+        choices=["table", "calib"],
+        default="table",
+        help="table: use the JSON human_scale_table. "
+             "calib: LSQ-fit the scale table from BVH frame 0.",
+    )
+
     args = parser.parse_args()
     
     if args.save_path is not None:
@@ -86,11 +94,17 @@ if __name__ == "__main__":
     
     motion_fps = args.motion_fps
 
-    # Initialize the retargeting system
+    # Initialize the retargeting system. In "calib" mode the calibration frame
+    # (BVH frame 0) is used to LSQ-fit human_scale_table per-(BVH, robot); in
+    # "table" mode (default) the JSON human_scale_table is used as-is. In "table"
+    # mode we keep the runtime height ratio at 1.0 (actual_human_height=None) so
+    # the table is applied verbatim; "calib" needs the actual height for the fit.
+    calibration_frame = lafan1_data_frames[0] if args.scale_mode == "calib" else None
     retargeter = GMR(
         src_human=f"bvh_{args.format}",
         tgt_robot=args.robot,
         actual_human_height=actual_human_height,
+        calibration_frame=calibration_frame,
     )
     
     robot_motion_viewer = RobotMotionViewer(robot_type=args.robot,

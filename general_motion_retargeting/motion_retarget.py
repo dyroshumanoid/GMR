@@ -1,10 +1,12 @@
+import copy
 import mink
 import mujoco as mj
 import numpy as np
 import json
 import yaml
+from collections import defaultdict
 from scipy.spatial.transform import Rotation as R
-from .params import ROBOT_XML_DICT, IK_CONFIG_DICT
+from .params import ROBOT_XML_DICT, IK_CONFIG_DICT, ASSET_ROOT
 from rich import print
 from mink.exceptions import TargetNotSet
 
@@ -105,6 +107,7 @@ class CollisionBarrierTask(mink.Task):
                 dBdh = self._relaxed_barrier_gradient(h)
                 J_bar = dBdh * J_h
                 e_bar = 0.0
+
                 J_rows.append(J_bar)
                 e_rows.append(np.array([e_bar]))
                 w_rows.append(np.array([self.w_bar]))
@@ -238,9 +241,15 @@ class GeneralMotionRetargeting:
         damping: float=0.05,
         verbose: bool=True,
         use_velocity_limit: bool=True,
+        calibration_frame: dict = None,
+        calib_iters: int = 3,
+        _ik_config_override: dict = None,
     ) -> None:
         self._warmup_done = False
         self._warmup_iters = 100
+        self.src_human = src_human
+        self.tgt_robot = tgt_robot
+        self.actual_human_height = actual_human_height
 
         # load the robot model
         self.xml_file = str(ROBOT_XML_DICT[tgt_robot])
@@ -275,18 +284,25 @@ class GeneralMotionRetargeting:
             if verbose:
                 print(f"Motor ID {i}: {motor_name}")
 
-        # Load the IK config
-        with open(IK_CONFIG_DICT[src_human][tgt_robot]) as f:
-            ik_config = json.load(f)
-        if verbose:
-            print("Use IK config: ", IK_CONFIG_DICT[src_human][tgt_robot])
-        
+        # Load the IK config (or use override for in-process orientation-only pre-pass)
+        if _ik_config_override is not None:
+            ik_config = _ik_config_override
+        else:
+            with open(IK_CONFIG_DICT[src_human][tgt_robot]) as f:
+                ik_config = json.load(f)
+            if verbose:
+                print("Use IK config: ", IK_CONFIG_DICT[src_human][tgt_robot])
+
+        # Keep a pristine copy of the raw config so dynamic calibration can
+        # rebuild an orientation-only variant from it later.
+        self._raw_ik_config = copy.deepcopy(ik_config)
+
         # compute the scale ratio based on given human height and the assumption in the IK config
         if actual_human_height is not None:
             ratio = actual_human_height / ik_config["human_height_assumption"]
         else:
             ratio = 1.0
-            
+
         # adjust the human scale table
         for key in ik_config["human_scale_table"].keys():
             ik_config["human_scale_table"][key] = ik_config["human_scale_table"][key] * ratio
@@ -323,7 +339,7 @@ class GeneralMotionRetargeting:
         self.ik_limits = [mink.ConfigurationLimit(self.model)]
 
         # Load robot-specific collision parameters from an external YAML file
-        collision_cfg_path = f"assets/{tgt_robot}/collision_cfg.yaml"
+        collision_cfg_path = ASSET_ROOT / tgt_robot / "collision_cfg.yaml"
         with open(collision_cfg_path, 'r') as f:
             cfg = yaml.safe_load(f)
 
@@ -442,14 +458,16 @@ class GeneralMotionRetargeting:
 
         self.ground_offset = -0.01
         self.floor_gid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "floor")
-        left_candidates  = ["Left_Foot", "Left_Inner_Foot", "Left_Outer_Foot", "left_ankle_roll_link",
-                             "left_foot1_collision", "left_foot2_collision", "left_foot3_collision",
-                             "left_foot4_collision", "left_foot5_collision", "left_foot6_collision",
-                             "left_foot7_collision"]
-        right_candidates = ["Right_Foot", "Right_Inner_Foot", "Right_Outer_Foot", "right_ankle_roll_link",
-                             "right_foot1_collision", "right_foot2_collision", "right_foot3_collision",
-                             "right_foot4_collision", "right_foot5_collision", "right_foot6_collision",
-                             "right_foot7_collision"]
+        foot_geoms_cfg = cfg.get('foot_geoms', {})
+        left_candidates = foot_geoms_cfg.get('left', [])
+        right_candidates = foot_geoms_cfg.get('right', [])
+
+        if not left_candidates or not right_candidates:
+            raise ValueError(
+                f"'foot_geoms' must be defined in {collision_cfg_path} with non-empty "
+                f"'left' and 'right' lists."
+            )
+
 
         self.left_foot_gids  = find_geoms(self.model, left_candidates)
         self.right_foot_gids = find_geoms(self.model, right_candidates)
@@ -463,9 +481,135 @@ class GeneralMotionRetargeting:
 
         assert self.floor_gid != -1, "geom 'floor' not found"
 
+        # Per-(BVH, robot) scale_table calibration: replace the JSON-loaded scales
+        # with values fit to the supplied calibration frame. See _calibrate_scale_table.
+        if calibration_frame is not None:
+            self._calibrate_scale_table(calibration_frame, calib_iters, verbose=verbose)
 
 
 
+    def _calibrate_scale_table(self, h_frame, calib_iters: int, verbose: bool = True):
+        """Per-(BVH, robot) scale_table calibration via orientation-only IK pre-pass + LSQ.
+
+        Mirrors logic in scripts/vis_calibrate_scale.py: pose the robot to match the
+        calibration frame's joint orientations, then LSQ-fit a single scale per
+        L/R-symmetric group from root-relative distances. The result replaces
+        self.human_scale_table directly (no runtime ratio multiplication since the
+        LSQ already encodes the actual person's link ratios).
+        """
+        # Derive tracked human bodies from IK tables (not from JSON scale_table),
+        # so calibration also works when JSON's human_scale_table is empty.
+        h_root_name = self._raw_ik_config["human_root_name"]
+        tracked_h_bodies = {h_root_name}
+        for table_key in ("ik_match_table1", "ik_match_table2"):
+            for r_body, entry in self._raw_ik_config.get(table_key, {}).items():
+                tracked_h_bodies.add(entry[0])
+
+        # 1) Build orientation-only config in-memory: zero all pos_weights, set
+        #    scales to 1.0 (the inner pass doesn't need scaling). human_height
+        #    assumption is set equal to actual so the inner ratio collapses to 1.
+        calib_config = copy.deepcopy(self._raw_ik_config)
+        for table_key in ("ik_match_table1", "ik_match_table2"):
+            for body, entry in calib_config.get(table_key, {}).items():
+                # entry: [human_body, pos_weight, rot_weight, pos_offset, rot_offset]
+                entry[1] = 0
+        # Populate scale_table for every tracked body + root, regardless of what
+        # the JSON had — scale_human_data must find the root key at minimum.
+        calib_config["human_scale_table"] = {b: 1.0 for b in tracked_h_bodies}
+        if self.actual_human_height is not None:
+            calib_config["human_height_assumption"] = self.actual_human_height
+
+        # 2) Inner GMR: same robot/source, but orientation-only and no recursion.
+        inner = GeneralMotionRetargeting(
+            src_human=self.src_human,
+            tgt_robot=self.tgt_robot,
+            actual_human_height=self.actual_human_height,
+            verbose=False,
+            _ik_config_override=calib_config,
+            calibration_frame=None,
+        )
+        qpos = inner.retarget(h_frame)
+        for _ in range(max(0, calib_iters)):
+            qpos = inner.retarget(h_frame)
+
+        # 3) Apply inner qpos to outer configuration to read robot link positions.
+        self.configuration.data.qpos[:] = qpos
+        mj.mj_forward(self.model, self.configuration.data)
+        data = self.configuration.data
+
+        # 4) Human→robot body mapping from the (raw) IK tables.
+        h_to_r = {}
+        for table_key in ("ik_match_table1", "ik_match_table2"):
+            for r_body, entry in self._raw_ik_config.get(table_key, {}).items():
+                h_to_r.setdefault(entry[0], r_body)
+
+        # 5) Root-relative distances for every tracked body.
+        r_root_name = self._raw_ik_config["robot_root_name"]
+        h_root_pos = np.asarray(h_frame[h_root_name][0])
+        r_root_pos = data.xpos[self.model.body(r_root_name).id].copy()
+
+        measurements = {}
+        skipped = []
+        for h_body in tracked_h_bodies:
+            if h_body == h_root_name:
+                continue
+            if h_body not in h_to_r or h_body not in h_frame:
+                skipped.append(h_body)
+                continue
+            try:
+                r_bid = self.model.body(h_to_r[h_body]).id
+            except KeyError:
+                skipped.append(h_body)
+                continue
+            d_h = float(np.linalg.norm(np.asarray(h_frame[h_body][0]) - h_root_pos))
+            d_r = float(np.linalg.norm(data.xpos[r_bid] - r_root_pos))
+            if d_h < 1e-6:
+                skipped.append(h_body)
+                continue
+            measurements[h_body] = (d_h, d_r)
+
+        # 6) Group L/R-symmetric pairs (e.g. LeftArm + RightArm) under one scale.
+        def pair_key(name):
+            for prefix in ("Left", "Right"):
+                if name.startswith(prefix) and len(name) > len(prefix):
+                    return name[len(prefix):]
+            return name
+
+        groups = defaultdict(list)
+        for body in tracked_h_bodies:
+            groups[pair_key(body)].append(body)
+
+        # 7) Build fresh scale table (default 1.0); fill from LSQ below.
+        new_scale_table = {b: 1.0 for b in tracked_h_bodies}
+        # Root scale = z-ratio (single-equation case; root has d_h = 0).
+        h_root_z = float(h_root_pos[2])
+        r_root_z = float(r_root_pos[2])
+        if abs(h_root_z) > 1e-6:
+            new_scale_table[h_root_name] = r_root_z / h_root_z
+
+        # 8) Per-pair LSQ: s = Σ(d_h·d_r) / Σ(d_h²). Single-body groups collapse
+        #    to d_r/d_h; L/R pairs average across both measurements.
+        for gk, bodies in groups.items():
+            if gk == h_root_name:
+                continue
+            pair_data = [measurements[b] for b in bodies if b in measurements]
+            if not pair_data:
+                continue
+            d_h_arr = np.array([p[0] for p in pair_data])
+            d_r_arr = np.array([p[1] for p in pair_data])
+            s = float(np.sum(d_h_arr * d_r_arr) / np.sum(d_h_arr ** 2))
+            for b in bodies:
+                new_scale_table[b] = s
+
+        # 9) Overwrite outer scale table (already-applied JSON ratio is discarded).
+        self.human_scale_table = new_scale_table
+        if verbose:
+            print(f"[GMR][Calibrate] scale_table updated from frame 0 "
+                  f"(src={self.src_human}, robot={self.tgt_robot}):")
+            for k, v in new_scale_table.items():
+                print(f"  {k:18s} = {v:.4f}")
+            if skipped:
+                print(f"[GMR][Calibrate] skipped (no mapping or zero distance): {skipped}")
 
     def setup_retarget_configuration(self):
         self.configuration = mink.Configuration(self.model)
@@ -669,7 +813,7 @@ class GeneralMotionRetargeting:
 
         if not self._warmup_done:
             for _ in range(self._warmup_iters):
-                self.collision_barrier_task.update(self.configuration)
+                # self.collision_barrier_task.update(self.configuration)
                 vel = mink.solve_ik(
                     self.configuration,
                     self.tasks1_solver,

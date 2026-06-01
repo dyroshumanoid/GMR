@@ -53,7 +53,15 @@ collision_limits:
       - ["head", "ground"]
     margin: 0.01
     detect_dist: 0.05
-
+foot_geoms:
+  left:
+    - Left_Foot
+    - Left_Inner_Foot
+    - Left_Outer_Foot
+  right:
+    - Right_Foot
+    - Right_Inner_Foot
+    - Right_Outer_Foot
 foot_contact:
   enabled: true
   threshold: 0.3   # m/s (1 cm/s) — contact activates when human foot speed <= this

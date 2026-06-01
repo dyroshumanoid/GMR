@@ -24,6 +24,7 @@ ROBOT_XML_DICT = {
     "pal_talos": ASSET_ROOT / "pal_talos" / "talos.xml",
     "tocabi": ASSET_ROOT / "tocabi" / "mjcf" / "dyros_tocabi_gmr.xml",
     "fourier_gr3": ASSET_ROOT / "fourier_gr3v2_1_1" / "mjcf" / "gr3v2_1_1_dummy_hand.xml",
+    "p73": ASSET_ROOT / "p73" / "mjcf" / "p73_walker.xml"
 }
 
 IK_CONFIG_DICT = {
@@ -47,6 +48,7 @@ IK_CONFIG_DICT = {
         "tienkung": IK_CONFIG_ROOT / "smplx_to_tienkung.json",
         "tocabi": IK_CONFIG_ROOT / "smplx_to_tocabi.json",
         "fourier_gr3": IK_CONFIG_ROOT / "smplx_to_gr3.json",
+        "p73": IK_CONFIG_ROOT / "smplx_to_p73.json",
     },
     "bvh_lafan1":{
         "unitree_g1": IK_CONFIG_ROOT / "bvh_lafan1_to_g1.json",
@@ -57,6 +59,7 @@ IK_CONFIG_DICT = {
         "engineai_pm01": IK_CONFIG_ROOT / "bvh_lafan1_to_pm01.json",
         "pal_talos": IK_CONFIG_ROOT / "bvh_to_talos.json",
         "tocabi": IK_CONFIG_ROOT / "bvh_lafan1_to_tocabi.json",
+        "p73": IK_CONFIG_ROOT / "bvh_lafan1_to_p73.json",
     },
     # Orientation-only IK used to pose the robot in the same configuration
     # as a BVH calibration frame (all position weights zeroed). Used by
@@ -83,6 +86,9 @@ IK_CONFIG_DICT = {
     "xrobot":{
         "unitree_g1": IK_CONFIG_ROOT / "xrobot_to_g1.json",
     },
+    "g1":{
+        "p73": IK_CONFIG_ROOT / "g1_to_p73.json",
+    },
 }
 
 
@@ -106,6 +112,7 @@ ROBOT_BASE_DICT = {
     "pal_talos": "base_link",
     "tocabi": "base_link",
     "fourier_gr3": "base_link",
+    "p73": "base_link",
 }
 
 VIEWER_CAM_DISTANCE_DICT = {
@@ -128,4 +135,5 @@ VIEWER_CAM_DISTANCE_DICT = {
     "pal_talos": 3.0,
     "tocabi": 3.0,
     "fourier_gr3": 2.0,
+    "p73": 2.0,
 }
